@@ -7,7 +7,9 @@
 # files it was made from haven't changed, and runs it: no other JVM, no network.
 #
 # Run under its own name it manages the programs:
-#   parley-launcher add NAME GROUP:ARTIFACT:VERSION   add a program (its app file and its command)
+#   parley-launcher add NAME GROUP:ARTIFACT:VERSION [MAIN]
+#                                                      add a program (its app file and its command);
+#                                                      MAIN: another main class in that jar
 #   parley-launcher remove NAME                        remove one
 #   parley-launcher list                               the programs and their artifacts
 #   parley-launcher command NAME                       the command NAME runs (made if need be)
@@ -231,7 +233,7 @@ if [ "$app" = parley-launcher ]; then
 		done
 		exit 0 ;;
 	add)
-		[ $# -eq 3 ] || { echo "usage: parley-launcher add NAME GROUP:ARTIFACT:VERSION" >&2; exit 2; }
+		[ $# -eq 3 ] || [ $# -eq 4 ] || { echo "usage: parley-launcher add NAME GROUP:ARTIFACT:VERSION [MAIN]" >&2; exit 2; }
 		app=$2
 		case $app in
 		*/* | parley-launcher | '' | .*) die "not a program name" ;;
@@ -250,7 +252,10 @@ if [ "$app" = parley-launcher ]; then
 			fi
 		done
 		mkdir -p "$prefix/apps" || exit 1
-		printf '# %s: the program the command %s runs\nartifact=%s\n' "$app" "$app" "$3" > "$prefix/apps/$app.properties" || exit 1
+		{
+			printf '# %s: the program the command %s runs\nartifact=%s\n' "$app" "$app" "$3"
+			[ -z "$4" ] || printf 'main=%s\n' "$4"
+		} > "$prefix/apps/$app.properties" || exit 1
 		ln -sf parley-launcher "$prefix/bin/$app" || exit 1
 		if [ -n "$bin" ]; then
 			mkdir -p "$bin" && ln -sf "$prefix/bin/$app" "$bin/$app" || exit 1

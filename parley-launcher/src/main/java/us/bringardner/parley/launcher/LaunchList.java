@@ -35,7 +35,8 @@ import java.util.List;
  * <li>{@code artifact}: the program's own jar</li>
  * <li>{@code main}: the class to run; {@code java}: the oldest Java it runs on</li>
  * <li>{@code option}: an option for java, before the class path; {@code 17+:OPTION} only on Java 17
- * or later</li>
+ * or later, {@code macos:OPTION} (linux:, windows:) only on that platform; {@code ${app}} is the
+ * program's name</li>
  * <li>{@code native}: a jar of this platform's native files (unpacked; {@code ${platform}} is
  * linux-x86_64, macos-aarch64, windows-x86_64 ...), and {@code native.optional} when the program
  * runs without it. An option or wrapper part naming {@code ${native}} (the folder they are unpacked
@@ -45,7 +46,8 @@ import java.util.List;
  * <li>{@code exclude}: group:artifact (either may be *) the program's build left out; a plugin's
  * dependency that matches is left out too (a plugin named in a settings file is always loaded)</li>
  * <li>{@code dependency}: a jar on the run-time class path, in class path order, with its SHA-256
- * (none for a SNAPSHOT, which changes with every build)</li>
+ * (none for a SNAPSHOT, which changes with every build); a classifier of {@code ${javafx.platform}}
+ * is this platform's JavaFX jar (linux, mac-aarch64, win ...)</li>
  * </ul>
  */
 public final class LaunchList {

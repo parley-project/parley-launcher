@@ -38,7 +38,10 @@ public final class Resolver {
 	}
 
 	private static final String NATIVE = "${native}";
-	private static final java.util.regex.Pattern MIN_JAVA_OPTION = java.util.regex.Pattern.compile("(\\d+)\\+:(.*)");
+	/** an option's conditions: N+: (Java N or later), macos:, linux:, windows: (that platform) */
+	private static final java.util.regex.Pattern OPTION_CONDITION = java.util.regex.Pattern.compile("(\\d+\\+|macos|linux|windows):(.*)");
+	/** a dependency's classifier for this platform's JavaFX jar */
+	public static final String JAVAFX_PLATFORM = "${javafx.platform}";
 
 	private final Locations where;
 	private final Repositories repos;
@@ -93,8 +96,13 @@ public final class Resolver {
 			throw new LaunchException(main + " (" + mainJar + ") has no " + LaunchList.RESOURCE
 					+ ": it was not built with parley-launcher-maven-plugin");
 		}
-		if( list.mainClass == null ) {
-			throw new LaunchException(main + "'s " + LaunchList.RESOURCE + " names no main class");
+		// (the app file may name another main class in the same jar: fsh-ide-fx beside fsh-ide)
+		String mainClass = desc.getProperty("main", "").trim();
+		if( mainClass.isEmpty() ) {
+			mainClass = list.mainClass;
+		}
+		if( mainClass == null ) {
+			throw new LaunchException(main + "'s " + LaunchList.RESOURCE + " names no main class (main= in " + appFile + " can)");
 		}
 		int running = Runtime.version().feature();
 		if( running < list.minJava ) {
@@ -104,7 +112,8 @@ public final class Resolver {
 		List<String> errors = new ArrayList<>();
 		Map<String, Entry> cp = new LinkedHashMap<>();
 		cp.put(main.key(), new Entry(main, mainJar));
-		for(LaunchList.Dependency d : list.dependencies) {
+		for(LaunchList.Dependency listed : list.dependencies) {
+			LaunchList.Dependency d = forThisPlatform(listed);
 			if( cp.containsKey(d.coordinates.key()) ) {
 				continue;
 			}
@@ -196,15 +205,21 @@ public final class Resolver {
 			ret.command.addAll(wrapper);
 		}
 		ret.command.add(java);
+		String platform = Locations.platform();
+		options:
 		for(String o : list.options) {
-			// (N+:option: only on Java N or later)
-			java.util.regex.Matcher m = MIN_JAVA_OPTION.matcher(o);
-			if( m.matches() ) {
-				if( running < Integer.parseInt(m.group(1)) ) {
-					continue;
+			// (N+:, macos:, linux:, windows: before an option: only on Java N or later, or that platform)
+			java.util.regex.Matcher m;
+			while ((m = OPTION_CONDITION.matcher(o)).matches()) {
+				String c = m.group(1);
+				boolean ok = c.endsWith("+") ? running >= Integer.parseInt(c.substring(0, c.length() - 1))
+						: platform.startsWith(c + "-");
+				if( !ok ) {
+					continue options;
 				}
 				o = m.group(2);
 			}
+			o = o.replace("${app}", app);
 			if( o.contains(NATIVE) ) {
 				if( nd == null ) {
 					continue;
@@ -219,8 +234,33 @@ public final class Resolver {
 		}
 		ret.command.add("-cp");
 		ret.command.add(String.join(File.pathSeparator, ret.classPath));
-		ret.command.add(list.mainClass);
+		ret.command.add(mainClass);
 		return ret;
+	}
+
+	/**
+	 * A dependency as this platform has it: a classifier of ${javafx.platform} (a JavaFX jar, whose
+	 * classifier the build machine's platform chose) becomes this platform's (linux, mac-aarch64,
+	 * win ...), checked against Maven Central's .sha1 as the list can't have its SHA-256
+	 */
+	static LaunchList.Dependency forThisPlatform(LaunchList.Dependency d) {
+		if( !d.coordinates.classifier.contains(JAVAFX_PLATFORM) ) {
+			return d;
+		}
+		return new LaunchList.Dependency(d.coordinates.withClassifier(
+				d.coordinates.classifier.replace(JAVAFX_PLATFORM, javafxPlatform(Locations.platform()))), null);
+	}
+
+	/** JavaFX's classifier for a platform: linux, linux-aarch64, mac, mac-aarch64, win */
+	static String javafxPlatform(String platform) {
+		switch (platform) {
+		case "linux-x86_64": return "linux";
+		case "linux-aarch64": return "linux-aarch64";
+		case "macos-x86_64": return "mac";
+		case "macos-aarch64": return "mac-aarch64";
+		case "windows-x86_64": return "win";
+		default: return platform;
+		}
 	}
 
 	/** A plugin, and the jars its own list names that the class path doesn't have yet */
@@ -255,7 +295,8 @@ public final class Resolver {
 			// (a plugin built without the list: its jar alone, as a jar in a plugin folder)
 			return;
 		}
-		for(LaunchList.Dependency d : list.dependencies) {
+		for(LaunchList.Dependency listed : list.dependencies) {
+			LaunchList.Dependency d = forThisPlatform(listed);
 			if( program.excluded(d.coordinates) ) {
 				continue;
 			}

@@ -61,6 +61,23 @@ fsh
 `~/.local/bin`. Running a newer one's `install.sh` upgrades it; `--uninstall` removes it and the
 programs' links (the jars stay in the repositories, which are Maven's too).
 
+## The Parley programs
+
+| Command | Add it with |
+|---|---|
+| `fsh` | `parley-launcher add fsh us.bringardner:fsh:VERSION` |
+| `fsh-ide` | `parley-launcher add fsh-ide us.bringardner:fsh-ide:VERSION` |
+| `fsh-ide-fx` (JavaFX) | `parley-launcher add fsh-ide-fx us.bringardner:fsh-ide:VERSION us.bringardner.fsh.ide.fx.FshIdeFx` |
+| `fshdb` | `parley-launcher add fshdb us.bringardner:fshdb:VERSION` |
+| `pssh` | `parley-launcher add pssh us.bringardner.parley:parley-ssh:VERSION` |
+| `parley-files-viewer` | `parley-launcher add parley-files-viewer us.bringardner.parley:parley-files-viewer:VERSION` |
+| `parley-files-viewer-fx` (JavaFX) | `parley-launcher add parley-files-viewer-fx us.bringardner.parley:parley-files-viewer:VERSION us.bringardner.parley.files.viewer.fx.Launcher` |
+| `pfv` | `parley-launcher add pfv us.bringardner.parley:parley-files-viewer-tui:VERSION` |
+
+The last argument of `add` names another main class in the same jar (`main=` in the app file).
+fsh-ide and fshdb run fsh scripts, so they use fsh's native jar too. The JavaFX programs get
+JavaFX's jars for the platform they run on.
+
 ## Plugins
 
 A plugin is named by its coordinates, one a line, in a `plugins.list`. These are read in this
@@ -121,9 +138,14 @@ aren't on Maven Central.
 </plugin>
 ```
 
-`{native}` is the folder the native jar is unpacked in, and `{platform}` is this platform:
-`linux-x86_64`, `linux-aarch64`, `macos-x86_64`, `macos-aarch64` or `windows-x86_64`. A plugin
-needs only the `list` goal, with no configuration.
+`{native}` is the folder the native jar is unpacked in, `{platform}` is this platform
+(`linux-x86_64`, `linux-aarch64`, `macos-x86_64`, `macos-aarch64` or `windows-x86_64`) and `{app}`
+is the program's name. An option can start with conditions: `17+:` (only on Java 17 or later) and
+`macos:`, `linux:` or `windows:` (only on that platform), as in `macos:-Xdock:name={app}`.
+`<nativeFrom>us.bringardner:fsh</nativeFrom>` instead of `nativeClassifier` uses a dependency's
+native jar. JavaFX's platform jars are listed as `${javafx.platform}`: the launcher takes the one
+for where the program runs (`linux`, `mac-aarch64`, `win` ...), checked against Maven Central's
+`.sha1`. A plugin needs only the `list` goal, with no configuration.
 
 ## Not yet (phase 2)
 
