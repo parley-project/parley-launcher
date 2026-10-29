@@ -1,0 +1,376 @@
+package us.bringardner.parley.launcher;
+
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.InetSocketAddress;
+import java.net.ProxySelector;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.function.Consumer;
+
+/**
+ * Finds an artifact's file: in the machine repository, then the user's (a SNAPSHOT: the user's
+ * first, where mvn install puts it), else downloads it from Maven Central into the user repository,
+ * written as Maven writes it (the .pom and .sha1 files beside the jar, and _remote.repositories), so
+ * Maven takes it as its own. A release is checked against the SHA-256 the program's list gives for
+ * it, else against the .sha1 Maven Central publishes; one that doesn't match is not used.
+ */
+public final class Repositories {
+
+	private final Locations where;
+	private final Consumer<String> warn;
+	private HttpClient http;
+
+	public Repositories(Locations where, Consumer<String> warn) {
+		this.where = where;
+		this.warn = warn;
+	}
+
+	/**
+	 * The file of c, found or downloaded.
+	 *
+	 * @param sha256 its SHA-256, from the program's list; null when not known (then Maven Central's
+	 *        .sha1 is the check)
+	 */
+	public File find(Coordinates c, String sha256) throws LaunchException {
+		File[] order = c.isSnapshot()
+				? new File[] { where.userRepository, where.machineRepository }
+				: new File[] { where.machineRepository, where.userRepository };
+		for(File repo : order) {
+			File f = new File(repo, c.path());
+			if( !f.isFile() ) {
+				continue;
+			}
+			if( c.isSnapshot() ) {
+				// (changes with every mvn install, so there is nothing to check it against)
+				return f;
+			}
+			String bad = check(f, sha256);
+			if( bad == null ) {
+				return f;
+			}
+			warn.accept(c + " in " + repo + " is not used: " + bad);
+		}
+		if( c.isSnapshot() ) {
+			throw new LaunchException(c + " is not installed in " + where.userRepository
+					+ ": a SNAPSHOT is not downloaded; run mvn install in " + c.artifactId + "'s project");
+		}
+		if( where.offline ) {
+			throw new LaunchException(c + " is not in " + where.machineRepository + " or " + where.userRepository
+					+ " (PARLEY_OFFLINE: nothing is downloaded)");
+		}
+		return download(c, sha256);
+	}
+
+	/** Why f is not c's file, or null when it is */
+	private String check(File f, String sha256) throws LaunchException {
+		if( sha256 != null ) {
+			String got = digest(f.toPath(), "SHA-256");
+			return got.equals(sha256) ? null : "its SHA-256 is " + got + ", the program's list says " + sha256;
+		}
+		// (a .sha1 beside it, as Maven writes for what it downloads; none: installed here, taken as is)
+		File sha1 = new File(f.getPath() + ".sha1");
+		if( sha1.isFile() ) {
+			try {
+				String want = firstWord(new String(Files.readAllBytes(sha1.toPath()), StandardCharsets.UTF_8));
+				String got = digest(f.toPath(), "SHA-1");
+				if( !want.isEmpty() && !got.equals(want) ) {
+					return "its SHA-1 is " + got + ", " + sha1.getName() + " says " + want;
+				}
+			} catch (IOException e) {
+				// (unreadable: as if there were none)
+			}
+		}
+		return null;
+	}
+
+	private File download(Coordinates c, String sha256) throws LaunchException {
+		File target = new File(where.userRepository, c.path());
+		File dir = target.getParentFile();
+		try {
+			Files.createDirectories(dir.toPath());
+		} catch (IOException e) {
+			throw new LaunchException("can't make " + dir + " for " + c + ": " + e.getMessage(), e);
+		}
+		String url = where.central + c.path();
+		Path part = null;
+		try {
+			part = Files.createTempFile(dir.toPath(), target.getName(), ".part");
+			int status = get(url, part);
+			if( status == 404 ) {
+				throw new LaunchException(c + " is not on Maven Central (" + url + ")");
+			}
+			if( status != 200 ) {
+				throw new LaunchException("downloading " + c + " from " + url + ": HTTP " + status);
+			}
+			String sha1 = digest(part, "SHA-1");
+			if( sha256 != null ) {
+				String got = digest(part, "SHA-256");
+				if( !got.equals(sha256) ) {
+					throw new LaunchException("the " + c + " downloaded from " + url + " is not the one the program was built with "
+							+ "(its SHA-256 is " + got + ", the program's list says " + sha256 + ")");
+				}
+			} else {
+				String want = firstWord(getText(url + ".sha1"));
+				if( !want.equals(sha1) ) {
+					throw new LaunchException("the " + c + " downloaded from " + url + " does not match Maven Central's "
+							+ "SHA-1 (" + sha1 + ", " + url + ".sha1 says " + want + ")");
+				}
+			}
+			moveInto(part, target.toPath());
+			part = null;
+			writeText(new File(target.getPath() + ".sha1").toPath(), sha1);
+			Set<String> names = new LinkedHashSet<>();
+			names.add(target.getName());
+			// (the POM and its parents, so Maven takes the jar's dependencies from them too, offline
+			// as well; not needed to run)
+			try {
+				if( savePom(c) ) {
+					names.add(new File(c.pomPath()).getName());
+				}
+				savePomParents(c);
+			} catch (IOException | LaunchException e) {
+				warn.accept("the POM of " + c + " was not saved: " + e.getMessage());
+			}
+			recordRemote(dir, names);
+			return target;
+		} catch (IOException e) {
+			throw new LaunchException("downloading " + c + " from " + url + ": " + e, e);
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			throw new LaunchException("downloading " + c + " was interrupted", e);
+		} finally {
+			if( part != null ) {
+				try {
+					Files.deleteIfExists(part);
+				} catch (IOException e) {
+					// (a .part file left behind; the next run makes its own)
+				}
+			}
+		}
+	}
+
+	private static final java.util.regex.Pattern PARENT = java.util.regex.Pattern.compile(
+			"(?s)<parent>.*?<groupId>\\s*([^<\\s]+)\\s*</groupId>.*?<artifactId>\\s*([^<\\s]+)\\s*</artifactId>.*?<version>\\s*([^<\\s]+)\\s*</version>.*?</parent>");
+
+	/** Download c's POM into the user repository when it isn't there; true when it was */
+	private boolean savePom(Coordinates c) throws IOException, InterruptedException, LaunchException {
+		File pom = new File(where.userRepository, c.pomPath());
+		if( pom.isFile() || new File(where.machineRepository, c.pomPath()).isFile() ) {
+			return false;
+		}
+		Files.createDirectories(pom.getParentFile().toPath());
+		Path p = Files.createTempFile(pom.getParentFile().toPath(), pom.getName(), ".part");
+		try {
+			if( get(where.central + c.pomPath(), p) != 200 ) {
+				return false;
+			}
+			String sha1 = digest(p, "SHA-1");
+			moveInto(p, pom.toPath());
+			writeText(new File(pom.getPath() + ".sha1").toPath(), sha1);
+			return true;
+		} finally {
+			Files.deleteIfExists(p);
+		}
+	}
+
+	/** The POMs c's POM inherits from (its <parent>, and theirs), as Maven needs them to read it */
+	private void savePomParents(Coordinates c) throws IOException, InterruptedException, LaunchException {
+		Coordinates at = c;
+		for(int depth = 0; depth < 20; depth++) {
+			File pom = new File(where.userRepository, at.pomPath());
+			if( !pom.isFile() ) {
+				pom = new File(where.machineRepository, at.pomPath());
+			}
+			if( !pom.isFile() ) {
+				return;
+			}
+			String xml = new String(Files.readAllBytes(pom.toPath()), StandardCharsets.UTF_8).replaceAll("(?s)<!--.*?-->", "");
+			java.util.regex.Matcher m = PARENT.matcher(xml);
+			if( !m.find() || m.group(3).contains("${") ) {
+				return;
+			}
+			Coordinates parent = new Coordinates(m.group(1), m.group(2), "pom", "", m.group(3));
+			if( savePom(parent) ) {
+				Set<String> one = new LinkedHashSet<>();
+				one.add(new File(parent.pomPath()).getName());
+				recordRemote(new File(where.userRepository, parent.pomPath()).getParentFile(), one);
+			}
+			at = parent;
+		}
+	}
+
+	/** _remote.repositories, as Maven's resolver keeps it: these files came from central */
+	private static void recordRemote(File dir, Set<String> names) {
+		Path p = dir.toPath().resolve("_remote.repositories");
+		try {
+			List<String> lines = Files.isRegularFile(p) ? Files.readAllLines(p, StandardCharsets.UTF_8) : new ArrayList<>();
+			if( lines.isEmpty() ) {
+				lines.add("#NOTE: This is a Maven Resolver internal implementation file, its format can be changed without prior notice.");
+				lines.add("#" + new java.util.Date());
+			}
+			boolean changed = false;
+			for(String n : names) {
+				String entry = n + ">central=";
+				if( !lines.contains(entry) ) {
+					lines.add(entry);
+					changed = true;
+				}
+			}
+			if( changed ) {
+				writeText(p, String.join("\n", lines));
+			}
+		} catch (IOException e) {
+			// (only Maven's bookkeeping: the files are there either way)
+		}
+	}
+
+	/** How many times a download is tried when the server is busy (429, 5xx) or the connection fails */
+	static final int ATTEMPTS = 4;
+
+	private int get(String url, Path to) throws IOException, InterruptedException, LaunchException {
+		return send(url, HttpResponse.BodyHandlers.ofFile(to)).statusCode();
+	}
+
+	private String getText(String url) throws IOException, InterruptedException, LaunchException {
+		HttpResponse<String> r = send(url, HttpResponse.BodyHandlers.ofString());
+		if( r.statusCode() != 200 ) {
+			throw new LaunchException(url + ": HTTP " + r.statusCode());
+		}
+		return r.body();
+	}
+
+	/** GET, again after a pause (Retry-After, else 1, 2, 4 s) while the server is busy or unreachable */
+	private <T> HttpResponse<T> send(String url, HttpResponse.BodyHandler<T> body)
+			throws IOException, InterruptedException, LaunchException {
+		for(int attempt = 1;; attempt++) {
+			HttpResponse<T> r;
+			try {
+				r = client().send(request(url), body);
+			} catch (IOException e) {
+				if( attempt >= ATTEMPTS ) {
+					throw e;
+				}
+				Thread.sleep(1000L << (attempt - 1));
+				continue;
+			}
+			int st = r.statusCode();
+			boolean busy = st == 429 || (st >= 500 && st <= 504);
+			if( !busy || attempt >= ATTEMPTS ) {
+				return r;
+			}
+			long wait = 1000L << (attempt - 1);
+			String after = r.headers().firstValue("Retry-After").orElse("");
+			if( after.matches("\\d+") ) {
+				wait = Math.min(30_000L, Long.parseLong(after) * 1000L);
+			}
+			Thread.sleep(wait);
+		}
+	}
+
+	private static HttpRequest request(String url) throws LaunchException {
+		try {
+			return HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofMinutes(2))
+					.header("User-Agent", "parley-launcher").GET().build();
+		} catch (IllegalArgumentException e) {
+			throw new LaunchException("not a URL: " + url, e);
+		}
+	}
+
+	private synchronized HttpClient client() {
+		if( http == null ) {
+			HttpClient.Builder b = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL)
+					.connectTimeout(Duration.ofSeconds(20));
+			ProxySelector proxy = proxyFromEnvironment();
+			if( proxy != null ) {
+				b.proxy(proxy);
+			}
+			http = b.build();
+		}
+		return http;
+	}
+
+	/**
+	 * HTTPS_PROXY (or https_proxy), as curl and most tools take it, when Java's own https.proxyHost
+	 * isn't set; null: Java's default
+	 */
+	static ProxySelector proxyFromEnvironment() {
+		if( System.getProperty("https.proxyHost") != null ) {
+			return null;
+		}
+		String p = System.getenv("HTTPS_PROXY");
+		if( p == null ) {
+			p = System.getenv("https_proxy");
+		}
+		if( p == null || p.isEmpty() ) {
+			return null;
+		}
+		try {
+			URI u = URI.create(p.contains("://") ? p : "http://" + p);
+			if( u.getHost() == null ) {
+				return null;
+			}
+			return ProxySelector.of(new InetSocketAddress(u.getHost(), u.getPort() < 0 ? 80 : u.getPort()));
+		} catch (IllegalArgumentException e) {
+			return null;
+		}
+	}
+
+	private static void moveInto(Path from, Path to) throws IOException {
+		try {
+			Files.move(from, to, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+		} catch (AtomicMoveNotSupportedException e) {
+			Files.move(from, to, StandardCopyOption.REPLACE_EXISTING);
+		}
+	}
+
+	private static void writeText(Path p, String text) throws IOException {
+		Path tmp = Files.createTempFile(p.getParent(), p.getFileName().toString(), ".part");
+		try {
+			Files.write(tmp, text.getBytes(StandardCharsets.UTF_8));
+			moveInto(tmp, p);
+		} finally {
+			Files.deleteIfExists(tmp);
+		}
+	}
+
+	private static String firstWord(String s) {
+		String t = s.trim();
+		int sp = t.indexOf(' ');
+		return (sp < 0 ? t : t.substring(0, sp)).toLowerCase();
+	}
+
+	/** A file's digest, in lower-case hex */
+	public static String digest(Path f, String algorithm) throws LaunchException {
+		try (InputStream in = Files.newInputStream(f)) {
+			MessageDigest md = MessageDigest.getInstance(algorithm);
+			byte[] buf = new byte[65536];
+			int n;
+			while ((n = in.read(buf)) > 0) {
+				md.update(buf, 0, n);
+			}
+			StringBuilder b = new StringBuilder();
+			for(byte x : md.digest()) {
+				b.append(String.format("%02x", x));
+			}
+			return b.toString();
+		} catch (IOException | NoSuchAlgorithmException e) {
+			throw new LaunchException("can't read " + f + ": " + e.getMessage(), e);
+		}
+	}
+}

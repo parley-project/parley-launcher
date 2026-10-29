@@ -1,0 +1,276 @@
+#!/bin/sh
+# Runs a Parley program on a Java installed on this machine. Each program is a link to this file,
+# named for it (fsh, fsh-ide, pssh ...); PREFIX/apps/NAME.properties names the program's artifact
+# (artifact=group:artifact:version). The jars it needs are found in the machine repository, then in
+# the user's (~/.m2/repository), or downloaded from Maven Central into the user's; the command that
+# runs it is saved (~/.parley/launcher/cache/NAME.args), so the next start only checks that the
+# files it was made from haven't changed, and runs it: no other JVM, no network.
+#
+# Run under its own name it manages the programs:
+#   parley-launcher add NAME GROUP:ARTIFACT:VERSION   add a program (its app file and its command)
+#   parley-launcher remove NAME                        remove one
+#   parley-launcher list                               the programs and their artifacts
+#   parley-launcher command NAME                       the command NAME runs (made if need be)
+#   parley-launcher --version
+#
+# Settings (environment variables):
+#   JAVA_HOME                   its java when that is 11 or later, else the newest Java found
+#   PARLEY_JAVA                 the java executable to use
+#   PARLEY_REFRESH=1            make the command again (after installing a newer Java, say)
+#   PARLEY_OFFLINE=true         download nothing
+#   PARLEY_MACHINE_REPOSITORY   instead of /usr/local/lib/parley/repository
+#   PARLEY_USER_REPOSITORY      instead of ~/.m2/repository (or settings.xml's localRepository)
+#   PARLEY_CENTRAL              instead of https://repo1.maven.org/maven2/
+#   PARLEY_LAUNCHER_HOME        instead of ~/.parley/launcher (the saved commands, native files)
+#   JDK_JAVA_OPTIONS            more options for java (java itself reads it)
+
+min=11
+
+die() {
+	echo "$app: $*" >&2
+	exit 1
+}
+
+app=$(basename "$0")
+
+# PREFIX: this file's folder's parent, through any links to it (/usr/local/bin/fsh -> ...)
+self=$0
+while [ -L "$self" ]; do
+	link=$(readlink "$self")
+	case $link in
+	/*) self=$link ;;
+	*) self=$(dirname "$self")/$link ;;
+	esac
+done
+prefix=$(cd "$(dirname "$self")/.." && pwd)
+jar=$prefix/lib/parley-launcher.jar
+home=${PARLEY_LAUNCHER_HOME:-$HOME/.parley/launcher}
+
+# ---- the saved command
+
+# (what, besides the files it was made from, the saved command depends on)
+key="1|$JAVA_HOME|$PARLEY_JAVA|$PARLEY_MACHINE_REPOSITORY|$PARLEY_USER_REPOSITORY|$PARLEY_CENTRAL|$PARLEY_OFFLINE"
+
+# true when NAME's saved command is current: its key is this one, and every file it was made from
+# is there and no newer than it ("!" FILE: is still not there)
+current() {
+	c=$home/cache/$1
+	[ -f "$c.args" ] && [ -f "$c.check" ] || return 1
+	[ "$c.check" -nt "$c.args" ] && return 1
+	IFS= read -r k < "$c.args" || return 1
+	[ "$k" = "$key" ] || return 1
+	while IFS= read -r f; do
+		case $f in
+		'') ;;
+		!*) [ -e "${f#!}" ] && return 1 ;;
+		*) { [ -e "$f" ] && [ ! "$f" -nt "$c.args" ]; } || return 1 ;;
+		esac
+	done < "$c.check"
+	return 0
+}
+
+# ---- Java
+
+# The major version of a java executable (8, 11, 17, 21 ...): from its JDK's release file, which
+# needs no JVM started, else from java -version; "1.8.0_392" and "17.0.9" / "25-ea" both
+java_major() {
+	j=$1
+	r=$(readlink -f "$j" 2>/dev/null) && [ -n "$r" ] && j=$r
+	h=$(cd "$(dirname "$j")/.." 2>/dev/null && pwd)
+	v=$(sed -n 's/^JAVA_VERSION="\([^"]*\)".*/\1/p' "$h/release" 2>/dev/null)
+	if [ -z "$v" ]; then
+		v=$("$j" -version 2>&1 | sed -n 's/.*version "\([^"]*\)".*/\1/p' | head -n 1)
+	fi
+	case $v in
+	1.*) v=${v#1.} ;;
+	esac
+	v=${v%%[.+_-]*}
+	case $v in
+	'' | *[!0-9]*) return 1 ;;
+	esac
+	echo "$v"
+}
+
+# java: PARLEY_JAVA, else JAVA_HOME's when it is new enough, else the newest found
+find_java() {
+	if [ -n "$PARLEY_JAVA" ]; then
+		v=$(java_major "$PARLEY_JAVA") || die "PARLEY_JAVA=$PARLEY_JAVA is not a java executable"
+		[ "$v" -ge "$min" ] || die "PARLEY_JAVA=$PARLEY_JAVA is Java $v; Java $min or later is needed"
+		java=$PARLEY_JAVA
+		return
+	fi
+	if [ -n "$JAVA_HOME" ] && [ -x "$JAVA_HOME/bin/java" ] && v=$(java_major "$JAVA_HOME/bin/java") && [ "$v" -ge "$min" ]; then
+		java=$JAVA_HOME/bin/java
+		return
+	fi
+	candidates=""
+	add() {
+		[ -n "$1" ] && [ -f "$1" ] && [ -x "$1" ] || return 0
+		j=$1
+		r=$(readlink -f "$j" 2>/dev/null) && [ -n "$r" ] && j=$r
+		case "
+$candidates
+" in
+		*"
+$j
+"*) return 0 ;;
+		esac
+		candidates="$candidates
+$j"
+	}
+	os=$(uname -s)
+	if [ "$os" = Darwin ] && [ -x /usr/libexec/java_home ]; then
+		h=$(/usr/libexec/java_home -v "$min+" 2>/dev/null) && add "$h/bin/java"
+	fi
+	if p=$(command -v java 2>/dev/null); then
+		# (macOS's /usr/bin/java with no JDK installed opens an "install Java" dialog: not that)
+		if [ "$os" != Darwin ] || [ "$p" != /usr/bin/java ] || /usr/libexec/java_home > /dev/null 2>&1; then
+			add "$p"
+		fi
+	fi
+	for j in \
+		/Library/Java/JavaVirtualMachines/*/Contents/Home/bin/java \
+		"$HOME"/Library/Java/JavaVirtualMachines/*/Contents/Home/bin/java \
+		/usr/lib/jvm/*/bin/java \
+		/usr/java/*/bin/java \
+		/opt/java/*/bin/java \
+		/opt/jdk*/bin/java \
+		/opt/homebrew/opt/openjdk*/bin/java \
+		/usr/local/opt/openjdk*/bin/java \
+		"$HOME"/.sdkman/candidates/java/*/bin/java \
+		"$HOME"/.jdks/*/bin/java; do
+		add "$j"
+	done
+	best=0
+	java=""
+	older=""
+	while IFS= read -r j; do
+		[ -n "$j" ] || continue
+		v=$(java_major "$j") || continue
+		if [ "$v" -ge "$min" ]; then
+			if [ "$v" -gt "$best" ]; then
+				best=$v
+				java=$j
+			fi
+		else
+			older="$older
+    Java $v: $j"
+		fi
+	done <<EOF
+$candidates
+EOF
+	if [ -z "$java" ]; then
+		{
+			echo "$app: Java $min or later is needed, and none was found on this computer."
+			[ -n "$older" ] && echo "These are installed but too old:$older"
+			echo "Install a JDK $min or later (for example from https://adoptium.net), or set JAVA_HOME"
+			echo "(or PARLEY_JAVA) to one, and run $app again."
+		} >&2
+		exit 1
+	fi
+}
+
+# Make NAME's saved command (the launcher works it out, fetching what is missing)
+resolve() {
+	f=$prefix/apps/$1.properties
+	[ -f "$f" ] || die "there is no program $1 here ($f): parley-launcher add $1 GROUP:ARTIFACT:VERSION"
+	[ -f "$jar" ] || die "$jar is missing: keep the folder parley-launcher was installed in together"
+	find_java
+	mkdir -p "$home/cache" || exit 1
+	"$java" -XX:TieredStopAtLevel=1 -Xshare:auto -jar "$jar" resolve --app "$1" --app-file "$f" \
+		--java "$java" --cache "$home/cache/$1" --key "$key" || exit $?
+}
+
+# Run NAME's saved command with these arguments after it
+run() {
+	c=$home/cache/$1
+	shift
+	n=$#
+	first=yes
+	while IFS= read -r line; do
+		if [ -n "$first" ]; then
+			first=""
+			continue
+		fi
+		set -- "$@" "$line"
+	done < "$c.args"
+	# (the program's arguments, first in "$@" so far, to the end)
+	i=0
+	while [ "$i" -lt "$n" ]; do
+		a=$1
+		shift
+		set -- "$@" "$a"
+		i=$((i + 1))
+	done
+	exec "$@"
+}
+
+# ---- parley-launcher's own commands
+
+if [ "$app" = parley-launcher ]; then
+	bin=""
+	[ -f "$prefix/launcher.conf" ] && bin=$(sed -n 's/^bin=//p' "$prefix/launcher.conf")
+	case $1 in
+	--version)
+		find_java
+		exec "$java" -jar "$jar" --version ;;
+	list)
+		for f in "$prefix"/apps/*.properties; do
+			[ -f "$f" ] || continue
+			n=$(basename "$f" .properties)
+			echo "$n	$(sed -n 's/^artifact=//p' "$f")"
+		done
+		exit 0 ;;
+	add)
+		[ $# -eq 3 ] || { echo "usage: parley-launcher add NAME GROUP:ARTIFACT:VERSION" >&2; exit 2; }
+		app=$2
+		case $app in
+		*/* | parley-launcher | '' | .*) die "not a program name" ;;
+		esac
+		case $3 in
+		*:*:*) ;;
+		*) die "$3 is not group:artifact:version" ;;
+		esac
+		mkdir -p "$prefix/apps" || exit 1
+		printf '# %s: the program the command %s runs\nartifact=%s\n' "$app" "$app" "$3" > "$prefix/apps/$app.properties" || exit 1
+		ln -sf parley-launcher "$prefix/bin/$app" || exit 1
+		if [ -n "$bin" ]; then
+			mkdir -p "$bin" && ln -sf "$prefix/bin/$app" "$bin/$app" || exit 1
+		fi
+		# (made now, so a missing jar or SNAPSHOT shows here, not at the first start)
+		PARLEY_REFRESH=1
+		resolve "$app"
+		echo "added $app ($3)${bin:+: $bin/$app}"
+		exit 0 ;;
+	remove)
+		[ $# -eq 2 ] || { echo "usage: parley-launcher remove NAME" >&2; exit 2; }
+		app=$2
+		[ -f "$prefix/apps/$app.properties" ] || die "there is no program $app here"
+		rm -f "$prefix/apps/$app.properties" "$prefix/bin/$app"
+		if [ -n "$bin" ] && [ -L "$bin/$app" ] && [ "$(readlink "$bin/$app")" = "$prefix/bin/$app" ]; then
+			rm -f "$bin/$app"
+		fi
+		rm -f "$home/cache/$app.args" "$home/cache/$app.check"
+		echo "removed $app"
+		exit 0 ;;
+	command)
+		[ $# -eq 2 ] || { echo "usage: parley-launcher command NAME" >&2; exit 2; }
+		app=$2
+		if [ -n "$PARLEY_REFRESH" ] || ! current "$app"; then
+			resolve "$app"
+		fi
+		tail -n +2 "$home/cache/$app.args"
+		exit 0 ;;
+	*)
+		sed -n '2,/^$/s/^# \{0,1\}//p' "$self"
+		[ -z "$1" ] || [ "$1" = --help ] || exit 2
+		exit 0 ;;
+	esac
+fi
+
+# ---- a program
+
+if [ -n "$PARLEY_REFRESH" ] || ! current "$app"; then
+	resolve "$app"
+fi
+run "$app" "$@"

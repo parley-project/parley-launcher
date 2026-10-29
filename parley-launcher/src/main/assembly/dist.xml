@@ -1,0 +1,35 @@
+<assembly xmlns="http://maven.apache.org/ASSEMBLY/2.2.0"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/ASSEMBLY/2.2.0 https://maven.apache.org/xsd/assembly-2.2.0.xsd">
+	<!-- target/parley-launcher-VERSION.tar.gz: what a user unpacks and installs (install.sh) -->
+	<id>dist</id>
+	<formats>
+		<format>tar.gz</format>
+	</formats>
+	<baseDirectory>parley-launcher-${project.version}</baseDirectory>
+	<files>
+		<file>
+			<source>src/main/scripts/parley-launcher</source>
+			<outputDirectory>bin</outputDirectory>
+			<fileMode>0755</fileMode>
+			<lineEnding>unix</lineEnding>
+		</file>
+		<file>
+			<source>src/main/scripts/install.sh</source>
+			<outputDirectory>.</outputDirectory>
+			<fileMode>0755</fileMode>
+			<lineEnding>unix</lineEnding>
+		</file>
+		<file>
+			<source>${project.build.directory}/${project.build.finalName}.jar</source>
+			<outputDirectory>lib</outputDirectory>
+			<destName>parley-launcher.jar</destName>
+			<fileMode>0644</fileMode>
+		</file>
+		<file>
+			<source>../LICENSE</source>
+			<outputDirectory>.</outputDirectory>
+			<fileMode>0644</fileMode>
+		</file>
+	</files>
+</assembly>
