@@ -114,11 +114,19 @@ public class ListMojo extends AbstractMojo {
 		}
 		list.plugins = plugins;
 
-		// (what the build left out of the program, so a plugin doesn't bring it back)
+		// (what the build left out of the program, so a plugin doesn't bring it back: each excluded
+		// artifact that isn't on the program's class path by another way; not a wildcard, which
+		// would leave out every jar a plugin needs)
+		java.util.Set<String> onClassPath = new java.util.HashSet<>();
+		for(Artifact a : project.getArtifacts()) {
+			onClassPath.add(a.getGroupId() + ":" + a.getArtifactId());
+		}
 		for(org.apache.maven.model.Dependency d : project.getDependencies()) {
 			for(org.apache.maven.model.Exclusion x : d.getExclusions()) {
 				String e = x.getGroupId() + ":" + x.getArtifactId();
-				if( !list.excludes.contains(e) ) {
+				if( e.contains("*") ) {
+					getLog().debug("exclusion " + e + " under " + d.getArtifactId() + ": not listed (a wildcard)");
+				} else if( !onClassPath.contains(e) && !list.excludes.contains(e) ) {
 					list.excludes.add(e);
 				}
 			}
@@ -140,6 +148,11 @@ public class ListMojo extends AbstractMojo {
 				} catch (LaunchException e) {
 					throw new MojoExecutionException(e.getMessage(), e);
 				}
+				if( builtHere(f) ) {
+					getLog().warn(c + " was built and installed here, not downloaded: its SHA-256 is this build's. "
+							+ "Unless its build is reproducible (project.build.outputTimestamp), the jar on Maven Central "
+							+ "may differ, and parley-launcher will refuse it");
+				}
 			}
 			list.dependencies.add(new LaunchList.Dependency(c, sha));
 		}
@@ -154,6 +167,27 @@ public class ListMojo extends AbstractMojo {
 		}
 		getLog().info(outputFile.getName() + ": " + list.dependencies.size() + " jars"
 				+ (mainClass == null ? "" : ", main " + mainClass));
+	}
+
+	/**
+	 * Whether a jar in the local repository was installed by a build here rather than downloaded:
+	 * Maven's resolver records each download in _remote.repositories beside it (FILE&gt;REPO=)
+	 */
+	static boolean builtHere(File jar) {
+		File remote = new File(jar.getParentFile(), "_remote.repositories");
+		if( !remote.isFile() ) {
+			return true;
+		}
+		try {
+			for(String line : Files.readAllLines(remote.toPath(), StandardCharsets.UTF_8)) {
+				if( line.startsWith(jar.getName() + ">") && !line.startsWith(jar.getName() + ">=") ) {
+					return false;
+				}
+			}
+		} catch (IOException e) {
+			return false;
+		}
+		return true;
 	}
 
 	/** {native} and {platform} as the list writes them */

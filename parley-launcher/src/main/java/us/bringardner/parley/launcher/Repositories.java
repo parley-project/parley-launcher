@@ -48,33 +48,61 @@ public final class Repositories {
 	 *        .sha1 is the check)
 	 */
 	public File find(Coordinates c, String sha256) throws LaunchException {
+		return find(c, sha256, new ArrayList<>());
+	}
+
+	/**
+	 * As find(c, sha256), adding to checks, for the saved command, "!" + each place looked in first
+	 * where c is not: c coming to be there means the command must be made again
+	 */
+	public File find(Coordinates c, String sha256, List<String> checks) throws LaunchException {
 		File[] order = c.isSnapshot()
 				? new File[] { where.userRepository, where.machineRepository }
 				: new File[] { where.machineRepository, where.userRepository };
-		for(File repo : order) {
-			File f = new File(repo, c.path());
+		for(int i = 0; i < order.length; i++) {
+			File f = new File(order[i], c.path());
 			if( !f.isFile() ) {
 				continue;
 			}
 			if( c.isSnapshot() ) {
 				// (changes with every mvn install, so there is nothing to check it against)
+				absentBefore(order, i, c, checks);
 				return f;
 			}
 			String bad = check(f, sha256);
 			if( bad == null ) {
+				absentBefore(order, i, c, checks);
 				return f;
 			}
-			warn.accept(c + " in " + repo + " is not used: " + bad);
+			warn.accept(c + " in " + order[i] + " is not used: " + bad);
 		}
-		if( c.isSnapshot() ) {
-			throw new LaunchException(c + " is not installed in " + where.userRepository
-					+ ": a SNAPSHOT is not downloaded; run mvn install in " + c.artifactId + "'s project");
+		try {
+			if( c.isSnapshot() ) {
+				throw new LaunchException(c + " is not installed in " + where.userRepository
+						+ ": a SNAPSHOT is not downloaded; run mvn install in " + c.artifactId + "'s project");
+			}
+			if( where.offline ) {
+				throw new LaunchException(c + " is not in " + where.machineRepository + " or " + where.userRepository
+						+ " (PARLEY_OFFLINE: nothing is downloaded)").temporary();
+			}
+			File ret = download(c, sha256);
+			// (it is in the user repository now; the machine repository comes before it)
+			absentBefore(order, java.util.Arrays.asList(order).indexOf(where.userRepository), c, checks);
+			return ret;
+		} catch (LaunchException e) {
+			absentBefore(order, order.length, c, checks);
+			throw e;
 		}
-		if( where.offline ) {
-			throw new LaunchException(c + " is not in " + where.machineRepository + " or " + where.userRepository
-					+ " (PARLEY_OFFLINE: nothing is downloaded)");
+	}
+
+	/** "!" + c's path in each of the first n repositories of order: c coming to be there changes things */
+	private static void absentBefore(File[] order, int n, Coordinates c, List<String> checks) {
+		for(int i = 0; i < n; i++) {
+			File f = new File(order[i], c.path());
+			if( !f.isFile() ) {
+				checks.add("!" + f.getAbsolutePath());
+			}
 		}
-		return download(c, sha256);
 	}
 
 	/** Why f is not c's file, or null when it is */
@@ -116,7 +144,7 @@ public final class Repositories {
 				throw new LaunchException(c + " is not on Maven Central (" + url + ")");
 			}
 			if( status != 200 ) {
-				throw new LaunchException("downloading " + c + " from " + url + ": HTTP " + status);
+				throw new LaunchException("downloading " + c + " from " + url + ": HTTP " + status).temporary();
 			}
 			String sha1 = digest(part, "SHA-1");
 			if( sha256 != null ) {
@@ -150,10 +178,10 @@ public final class Repositories {
 			recordRemote(dir, names);
 			return target;
 		} catch (IOException e) {
-			throw new LaunchException("downloading " + c + " from " + url + ": " + e, e);
+			throw new LaunchException("downloading " + c + " from " + url + ": " + e, e).temporary();
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
-			throw new LaunchException("downloading " + c + " was interrupted", e);
+			throw new LaunchException("downloading " + c + " was interrupted", e).temporary();
 		} finally {
 			if( part != null ) {
 				try {
@@ -171,7 +199,7 @@ public final class Repositories {
 	/** Download c's POM into the user repository when it isn't there; true when it was */
 	private boolean savePom(Coordinates c) throws IOException, InterruptedException, LaunchException {
 		File pom = new File(where.userRepository, c.pomPath());
-		if( pom.isFile() || new File(where.machineRepository, c.pomPath()).isFile() ) {
+		if( pom.isFile() ) {
 			return false;
 		}
 		Files.createDirectories(pom.getParentFile().toPath());
@@ -181,6 +209,11 @@ public final class Repositories {
 				return false;
 			}
 			String sha1 = digest(p, "SHA-1");
+			// (checked as a jar is: a proxy's error page must not become the POM Maven keeps)
+			String want = firstWord(getText(where.central + c.pomPath() + ".sha1"));
+			if( !want.equals(sha1) ) {
+				throw new LaunchException(c.pomPath() + " does not match Maven Central's SHA-1");
+			}
 			moveInto(p, pom.toPath());
 			writeText(new File(pom.getPath() + ".sha1").toPath(), sha1);
 			return true;
@@ -194,9 +227,6 @@ public final class Repositories {
 		Coordinates at = c;
 		for(int depth = 0; depth < 20; depth++) {
 			File pom = new File(where.userRepository, at.pomPath());
-			if( !pom.isFile() ) {
-				pom = new File(where.machineRepository, at.pomPath());
-			}
 			if( !pom.isFile() ) {
 				return;
 			}
@@ -331,11 +361,21 @@ public final class Repositories {
 		}
 	}
 
-	private static void moveInto(Path from, Path to) throws IOException {
+	static void moveInto(Path from, Path to) throws IOException {
+		readable(from);
 		try {
 			Files.move(from, to, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
 		} catch (AtomicMoveNotSupportedException e) {
 			Files.move(from, to, StandardCopyOption.REPLACE_EXISTING);
+		}
+	}
+
+	/** rw-r--r--, as Maven leaves what it writes (a temporary file is made rw-------) */
+	static void readable(Path p) {
+		try {
+			Files.setPosixFilePermissions(p, java.nio.file.attribute.PosixFilePermissions.fromString("rw-r--r--"));
+		} catch (IOException | UnsupportedOperationException e) {
+			// (not a POSIX file system: as it is)
 		}
 	}
 

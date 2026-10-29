@@ -113,7 +113,9 @@ class LauncherTest {
 	void publish(Coordinates c, byte[] data) throws Exception {
 		central.put(c.path(), data);
 		central.put(c.path() + ".sha1", sha(data, "SHA-1").getBytes(StandardCharsets.UTF_8));
-		central.put(c.pomPath(), "<project/>".getBytes(StandardCharsets.UTF_8));
+		byte[] pom = "<project/>".getBytes(StandardCharsets.UTF_8);
+		central.put(c.pomPath(), pom);
+		central.put(c.pomPath() + ".sha1", sha(pom, "SHA-1").getBytes(StandardCharsets.UTF_8));
 	}
 
 	void put(File repo, Coordinates c, byte[] data) throws IOException {
@@ -359,6 +361,66 @@ class LauncherTest {
 		assertEquals(1, notes.size(), notes.toString());
 		assertTrue(notes.get(0).contains("was built with org.x:lib:3.0"), notes.get(0));
 		assertTrue(l.checks.contains(settings.getAbsolutePath()));
+	}
+
+	@Test
+	void aPomThatDoesNotMatchIsNotKept() throws Exception {
+		Coordinates c = Coordinates.parse("org.x:lib:1.0");
+		byte[] data = jar("a.txt", "a");
+		publish(c, data);
+		central.put(c.pomPath(), "<html>proxy error</html>".getBytes(StandardCharsets.UTF_8));
+		new Repositories(where, notes::add).find(c, sha(data, "SHA-256"));
+		assertFalse(new File(where.userRepository, c.pomPath()).exists());
+		assertEquals(1, notes.size(), notes.toString());
+	}
+
+	@Test
+	void parentPomsAreSavedForMaven() throws Exception {
+		Coordinates c = Coordinates.parse("org.x:lib:1.0");
+		byte[] data = jar("a.txt", "a");
+		publish(c, data);
+		byte[] pom = "<project><parent><groupId>org.x</groupId><artifactId>parent</artifactId><version>3</version></parent></project>"
+				.getBytes(StandardCharsets.UTF_8);
+		central.put(c.pomPath(), pom);
+		central.put(c.pomPath() + ".sha1", sha(pom, "SHA-1").getBytes(StandardCharsets.UTF_8));
+		publish(Coordinates.parse("org.x:parent:pom:3"), "<project/>".getBytes(StandardCharsets.UTF_8));
+		new Repositories(where, notes::add).find(c, sha(data, "SHA-256"));
+		assertTrue(new File(where.userRepository, "org/x/parent/3/parent-3.pom").isFile());
+	}
+
+	@Test
+	void whatTheCommandDependsOn() throws Exception {
+		// (a release in the user repository: its place in the machine repository is watched; a
+		// download the same; never the user repository's own path, or every start would remake it)
+		Coordinates c = Coordinates.parse("org.x:lib:1.0");
+		byte[] data = jar("a.txt", "a");
+		publish(c, data);
+		List<String> checks = new ArrayList<>();
+		new Repositories(where, notes::add).find(c, sha(data, "SHA-256"), checks);
+		assertEquals(1, checks.size(), checks.toString());
+		assertEquals("!" + new File(where.machineRepository, c.path()).getAbsolutePath(), checks.get(0));
+		checks.clear();
+		new Repositories(where, notes::add).find(c, sha(data, "SHA-256"), checks);
+		assertEquals("!" + new File(where.machineRepository, c.path()).getAbsolutePath(), checks.get(0));
+		// (a SNAPSHOT from the machine repository: the user repository, where mvn install puts it, is watched)
+		Coordinates s = Coordinates.parse("org.x:snap:1.0-SNAPSHOT");
+		put(where.machineRepository, s, jar("a", "a"));
+		checks.clear();
+		new Repositories(where, notes::add).find(s, null, checks);
+		assertEquals("!" + new File(where.userRepository, s.path()).getAbsolutePath(), checks.get(0));
+	}
+
+	@Test
+	void anOptionalNativeJarThatFailedForNowIsTriedAgain() throws Exception {
+		File appFile = app(LaunchList.HEADER + "\nmain=org.x.Main\nnative=org.x:app:jar:${platform}:1.0\nnative.optional=true\n");
+		Coordinates nat = Coordinates.parse("org.x:app:jar:" + Locations.platform() + ":1.0");
+		Resolver.Launch l = new Resolver(where, notes::add).resolve("app", appFile, "java");
+		assertFalse(l.retry);
+		assertTrue(l.checks.contains("!" + new File(where.userRepository, nat.path()).getAbsolutePath()), l.checks.toString());
+		busy.put(nat.path(), new AtomicInteger(100));
+		central.put(nat.path(), jar("x", "x"));
+		l = new Resolver(where, notes::add).resolve("app", appFile, "java");
+		assertTrue(l.retry);
 	}
 
 	@Test

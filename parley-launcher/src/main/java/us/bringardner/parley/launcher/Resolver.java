@@ -32,6 +32,8 @@ public final class Resolver {
 		public final List<String> command = new ArrayList<>();
 		/** files that, when changed, mean the command must be made again; "!" + path: must not exist */
 		public final List<String> checks = new ArrayList<>();
+		/** something failed that may work later (an optional native jar not downloaded): try again next time */
+		public boolean retry;
 		public final List<String> classPath = new ArrayList<>();
 	}
 
@@ -85,7 +87,7 @@ public final class Resolver {
 
 		Launch ret = new Launch();
 		ret.checks.add(appFile.getAbsolutePath());
-		File mainJar = repos.find(main, desc.getProperty("sha256"));
+		File mainJar = repos.find(main, desc.getProperty("sha256"), ret.checks);
 		LaunchList list = readList(mainJar);
 		if( list == null ) {
 			throw new LaunchException(main + " (" + mainJar + ") has no " + LaunchList.RESOURCE
@@ -107,7 +109,7 @@ public final class Resolver {
 				continue;
 			}
 			try {
-				cp.put(d.coordinates.key(), new Entry(d.coordinates, repos.find(d.coordinates, d.sha256)));
+				cp.put(d.coordinates.key(), new Entry(d.coordinates, repos.find(d.coordinates, d.sha256, ret.checks)));
 			} catch (LaunchException e) {
 				errors.add(e.getMessage());
 			}
@@ -118,13 +120,14 @@ public final class Resolver {
 		if( list.nativeArtifact != null ) {
 			Coordinates n = Coordinates.parse(list.nativeArtifact.replace("${platform}", Locations.platform()));
 			try {
-				File jar = repos.find(n, null);
+				File jar = repos.find(n, null, ret.checks);
 				nativeDir = unpack(n, jar);
 				ret.checks.add(jar.getAbsolutePath());
 				ret.checks.add(new File(nativeDir, ".unpacked").getAbsolutePath());
 			} catch (LaunchException e) {
 				if( list.nativeOptional ) {
 					warn.accept("running without " + n + " (" + e.getMessage() + ")");
+					ret.retry |= e.isTemporary();
 				} else {
 					errors.add(e.getMessage());
 				}
@@ -154,7 +157,7 @@ public final class Resolver {
 					continue;
 				}
 				try {
-					addPlugin(LaunchList.Dependency.parse(t), list, cp, errors);
+					addPlugin(LaunchList.Dependency.parse(t), list, cp, errors, ret.checks);
 				} catch (IllegalArgumentException e) {
 					errors.add(settings + " line " + no + ": " + e.getMessage());
 				}
@@ -221,7 +224,11 @@ public final class Resolver {
 	}
 
 	/** A plugin, and the jars its own list names that the class path doesn't have yet */
-	private void addPlugin(LaunchList.Dependency p, LaunchList program, Map<String, Entry> cp, List<String> errors) {
+	private void addPlugin(LaunchList.Dependency p, LaunchList program, Map<String, Entry> cp, List<String> errors,
+			List<String> checks) {
+		if( p.sha256 != null && p.coordinates.isSnapshot() ) {
+			warn.accept("plugin " + p.coordinates + ": a SNAPSHOT changes with every build, so its sha256= is not checked");
+		}
 		Entry have = cp.get(p.coordinates.key());
 		if( have != null ) {
 			if( !have.coordinates.version.equals(p.coordinates.version) ) {
@@ -231,7 +238,7 @@ public final class Resolver {
 		}
 		File jar;
 		try {
-			jar = repos.find(p.coordinates, p.sha256);
+			jar = repos.find(p.coordinates, p.coordinates.isSnapshot() ? null : p.sha256, checks);
 		} catch (LaunchException e) {
 			errors.add("plugin " + p.coordinates + ": " + e.getMessage());
 			return;
@@ -261,7 +268,7 @@ public final class Resolver {
 				continue;
 			}
 			try {
-				cp.put(d.coordinates.key(), new Entry(d.coordinates, repos.find(d.coordinates, d.sha256)));
+				cp.put(d.coordinates.key(), new Entry(d.coordinates, repos.find(d.coordinates, d.sha256, checks)));
 			} catch (LaunchException x) {
 				errors.add("plugin " + p.coordinates + ": " + x.getMessage());
 			}
@@ -292,45 +299,71 @@ public final class Resolver {
 				c.groupId.replace('.', '/') + "/" + c.artifactId + "/" + c.version + "/" + c.classifier);
 		File marker = new File(dir, ".unpacked");
 		String stamp = jar.getAbsolutePath() + " " + jar.length() + " " + jar.lastModified();
+		File parent = dir.getParentFile();
+		Path tmp = null;
 		try {
-			if( marker.isFile() && new String(Files.readAllBytes(marker.toPath()), StandardCharsets.UTF_8).equals(stamp) ) {
+			if( stamp.equals(readStamp(marker)) ) {
 				return dir;
 			}
-			// (unpacked aside and moved in, so a program running from the folder keeps its files)
-			File parent = dir.getParentFile();
 			Files.createDirectories(parent.toPath());
-			Path tmp = Files.createTempDirectory(parent.toPath(), dir.getName() + ".");
-			try (ZipFile z = new ZipFile(jar)) {
-				Enumeration<? extends ZipEntry> en = z.entries();
-				while (en.hasMoreElements()) {
-					ZipEntry e = en.nextElement();
-					String name = e.getName();
-					if( e.isDirectory() || name.startsWith("META-INF/") ) {
-						continue;
-					}
-					Path out = tmp.resolve(name).normalize();
-					if( !out.startsWith(tmp) ) {
-						throw new LaunchException(jar + ": " + name + " is outside its folder");
-					}
-					Files.createDirectories(out.getParent());
-					try (InputStream in = z.getInputStream(e)) {
-						Files.copy(in, out, StandardCopyOption.REPLACE_EXISTING);
-					}
-					out.toFile().setExecutable(true, false);
+			// (one start at a time unpacks: two at once would both move a folder into place)
+			try (java.nio.channels.FileChannel ch = java.nio.channels.FileChannel.open(
+					parent.toPath().resolve(dir.getName() + ".lock"), java.nio.file.StandardOpenOption.CREATE,
+					java.nio.file.StandardOpenOption.WRITE);
+					java.nio.channels.FileLock lock = ch.lock()) {
+				if( stamp.equals(readStamp(marker)) ) {
+					return dir;
 				}
-			}
-			Files.write(tmp.resolve(".unpacked"), stamp.getBytes(StandardCharsets.UTF_8));
-			if( dir.exists() ) {
-				File old = new File(parent, dir.getName() + ".old." + System.nanoTime());
-				if( !dir.renameTo(old) ) {
-					throw new IOException("can't move " + dir + " aside");
+				// (unpacked aside and moved in, so a program running from the folder keeps its files)
+				tmp = Files.createTempDirectory(parent.toPath(), dir.getName() + ".");
+				try (ZipFile z = new ZipFile(jar)) {
+					Enumeration<? extends ZipEntry> en = z.entries();
+					while (en.hasMoreElements()) {
+						ZipEntry e = en.nextElement();
+						String name = e.getName();
+						if( e.isDirectory() || name.startsWith("META-INF/") ) {
+							continue;
+						}
+						Path out = tmp.resolve(name).normalize();
+						if( !out.startsWith(tmp) ) {
+							throw new LaunchException(jar + ": " + name + " is outside its folder");
+						}
+						Files.createDirectories(out.getParent());
+						try (InputStream in = z.getInputStream(e)) {
+							Files.copy(in, out, StandardCopyOption.REPLACE_EXISTING);
+						}
+						out.toFile().setReadable(true, false);
+						out.toFile().setExecutable(true, false);
+					}
 				}
-				deleteTree(old.toPath());
+				Files.write(tmp.resolve(".unpacked"), stamp.getBytes(StandardCharsets.UTF_8));
+				tmp.toFile().setReadable(true, false);
+				tmp.toFile().setExecutable(true, false);
+				if( dir.exists() ) {
+					File old = new File(parent, dir.getName() + ".old." + System.nanoTime());
+					if( !dir.renameTo(old) ) {
+						throw new IOException("can't move " + dir + " aside");
+					}
+					deleteTree(old.toPath());
+				}
+				Files.move(tmp, dir.toPath());
+				tmp = null;
+				return dir;
 			}
-			Files.move(tmp, dir.toPath());
-			return dir;
 		} catch (IOException e) {
 			throw new LaunchException("can't unpack " + jar + " into " + dir + ": " + e.getMessage(), e);
+		} finally {
+			if( tmp != null ) {
+				deleteTree(tmp);
+			}
+		}
+	}
+
+	private static String readStamp(File marker) {
+		try {
+			return marker.isFile() ? new String(Files.readAllBytes(marker.toPath()), StandardCharsets.UTF_8) : null;
+		} catch (IOException e) {
+			return null;
 		}
 	}
 

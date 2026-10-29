@@ -62,8 +62,29 @@ public final class Main {
 		try {
 			Resolver.Launch launch = new Resolver(Locations.fromEnvironment(),
 					w -> System.err.println(name + ": note: " + w)).resolve(app, new File(appFile), java);
-			// (the java too: when it is gone, another is found)
+			// (the java too: when it is gone, another is found; this launcher's jar: an upgrade makes
+			// the commands again; Maven's settings.xml: it may move the user repository)
 			launch.checks.add(0, new File(java).getAbsolutePath());
+			File self = selfJar();
+			if( self != null ) {
+				launch.checks.add(self.getAbsolutePath());
+			}
+			File settings = new File(new File(System.getProperty("user.home"), ".m2"), "settings.xml");
+			launch.checks.add((settings.isFile() ? "" : "!") + settings.getAbsolutePath());
+			// ("retry": made again at the next start, when something failed that may work later, or
+			// when a SNAPSHOT or a plugins.list changed in this very second, which a shell comparing
+			// whole seconds would miss)
+			long now = System.currentTimeMillis() / 1000;
+			boolean retry = launch.retry;
+			for(String c : launch.checks) {
+				if( !c.startsWith("!") && (c.contains("-SNAPSHOT") || c.endsWith("plugins.list"))
+						&& new File(c).lastModified() / 1000 >= now ) {
+					retry = true;
+				}
+			}
+			if( retry ) {
+				launch.checks.add("retry");
+			}
 			write(new File(cache + ".check").toPath(), launch.checks);
 			List<String> lines = new ArrayList<>();
 			lines.add(key);
@@ -85,11 +106,26 @@ public final class Main {
 		}
 	}
 
+	/** the jar this class came from, or null */
+	private static File selfJar() {
+		try {
+			java.security.CodeSource cs = Main.class.getProtectionDomain().getCodeSource();
+			if( cs != null && cs.getLocation() != null ) {
+				File f = new File(cs.getLocation().toURI());
+				return f.isFile() ? f : null;
+			}
+		} catch (java.net.URISyntaxException | RuntimeException e) {
+			// (none)
+		}
+		return null;
+	}
+
 	private static void write(Path p, List<String> lines) throws IOException {
 		Files.createDirectories(p.getParent());
 		Path tmp = Files.createTempFile(p.getParent(), p.getFileName().toString(), ".part");
 		try {
 			Files.write(tmp, (String.join("\n", lines) + "\n").getBytes(StandardCharsets.UTF_8));
+			Repositories.readable(tmp);
 			try {
 				Files.move(tmp, p, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
 			} catch (AtomicMoveNotSupportedException e) {
