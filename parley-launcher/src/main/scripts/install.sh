@@ -17,6 +17,7 @@
 # repositories (they are Maven's too).
 
 set -e
+unset CDPATH
 SRC=$(cd "$(dirname "$0")" && pwd)
 
 user=""
@@ -50,6 +51,10 @@ fi
 case $prefix in
 /*) ;;
 *) prefix=$(pwd)/$prefix ;;
+esac
+case $bin in
+/*) ;;
+*) bin=$(pwd)/$bin ;;
 esac
 
 # sudo, for the commands that write where this user can't (the nearest folder that exists decides)

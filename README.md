@@ -39,7 +39,9 @@ fsh
    class path) and saves it in `~/.parley/launcher/cache/NAME.args`, with the files it was made
    from in `NAME.check`. Later starts only check that those files haven't changed, then run it:
    no other JVM starts, and nothing goes over the network. A newer SNAPSHOT installed, a plugin
-   added or a jar removed makes the command again.
+   added, a jar removed or put in the machine repository, a new launcher or a changed
+   `settings.xml` makes the command again, and so does a failure that may pass (an optional
+   native jar the network didn't deliver).
 7. **Native files.** A program can name a jar of this platform's native files
    (`fsh-2.0.0-linux-x86_64.jar`: fsh's keyboard library and `fshexec`). The launcher unpacks it
    into `~/.parley/launcher/native/` and passes that folder to the program's options. Without it,
@@ -49,7 +51,7 @@ fsh
 
 | Command | |
 |---|---|
-| `parley-launcher add NAME GROUP:ARTIFACT:VERSION` | Add a program: `PREFIX/apps/NAME.properties`, a link `NAME` beside the launcher and in the bin folder, and its command made at once (so a missing jar shows now) |
+| `parley-launcher add NAME GROUP:ARTIFACT:VERSION` | Add a program: `PREFIX/apps/NAME.properties`, a link `NAME` beside the launcher and in the bin folder, and its command made at once (so a missing jar shows now). As root (`sudo`, for a system-wide install), each user's command is made at their own first start instead, so root never writes into a user's `~/.m2`. It refuses a name that is already some other command |
 | `parley-launcher remove NAME` | Remove one |
 | `parley-launcher list` | The programs and their artifacts |
 | `parley-launcher command NAME` | The command NAME runs, one word a line |

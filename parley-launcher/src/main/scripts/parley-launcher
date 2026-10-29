@@ -25,6 +25,8 @@
 #   JDK_JAVA_OPTIONS            more options for java (java itself reads it)
 
 min=11
+# (cd prints the folder when CDPATH finds it, which would end up in the paths below)
+unset CDPATH
 
 die() {
 	echo "$app: $*" >&2
@@ -62,6 +64,7 @@ current() {
 	while IFS= read -r f; do
 		case $f in
 		'') ;;
+		retry) return 1 ;;
 		!*) [ -e "${f#!}" ] && return 1 ;;
 		*) { [ -e "$f" ] && [ ! "$f" -nt "$c.args" ]; } || return 1 ;;
 		esac
@@ -94,9 +97,15 @@ java_major() {
 # java: PARLEY_JAVA, else JAVA_HOME's when it is new enough, else the newest found
 find_java() {
 	if [ -n "$PARLEY_JAVA" ]; then
-		v=$(java_major "$PARLEY_JAVA") || die "PARLEY_JAVA=$PARLEY_JAVA is not a java executable"
+		# (a name or a relative path: the java it means, as a path that stays right from any folder)
+		j=$PARLEY_JAVA
+		case $j in
+		*/*) [ -x "$j" ] && j=$(cd "$(dirname "$j")" && pwd)/$(basename "$j") ;;
+		*) j=$(command -v "$j" 2>/dev/null) || j=$PARLEY_JAVA ;;
+		esac
+		v=$(java_major "$j") || die "PARLEY_JAVA=$PARLEY_JAVA is not a java executable"
 		[ "$v" -ge "$min" ] || die "PARLEY_JAVA=$PARLEY_JAVA is Java $v; Java $min or later is needed"
-		java=$PARLEY_JAVA
+		java=$j
 		return
 	fi
 	if [ -n "$JAVA_HOME" ] && [ -x "$JAVA_HOME/bin/java" ] && v=$(java_major "$JAVA_HOME/bin/java") && [ "$v" -ge "$min" ]; then
@@ -231,16 +240,31 @@ if [ "$app" = parley-launcher ]; then
 		*:*:*) ;;
 		*) die "$3 is not group:artifact:version" ;;
 		esac
+		# (never over a command that isn't one of the launcher's programs)
+		for l in "$prefix/bin/$app" ${bin:+"$bin/$app"}; do
+			if [ -e "$l" ] || [ -L "$l" ]; then
+				case $(readlink "$l" 2>/dev/null) in
+				parley-launcher | "$prefix/bin/$app") ;;
+				*) die "$l is there already, and is not a program parley-launcher added" ;;
+				esac
+			fi
+		done
 		mkdir -p "$prefix/apps" || exit 1
 		printf '# %s: the program the command %s runs\nartifact=%s\n' "$app" "$app" "$3" > "$prefix/apps/$app.properties" || exit 1
 		ln -sf parley-launcher "$prefix/bin/$app" || exit 1
 		if [ -n "$bin" ]; then
 			mkdir -p "$bin" && ln -sf "$prefix/bin/$app" "$bin/$app" || exit 1
 		fi
-		# (made now, so a missing jar or SNAPSHOT shows here, not at the first start)
-		PARLEY_REFRESH=1
-		resolve "$app"
 		echo "added $app ($3)${bin:+: $bin/$app}"
+		if [ "$(id -u)" -eq 0 ]; then
+			# (as root, for everyone: each user's command is made at their first start, in their own
+			# repository and cache; made here, root would own files in a home sudo kept)
+			echo "each user's first $app fetches what it needs"
+		else
+			# (made now, so a missing jar or SNAPSHOT shows here, not at the first start)
+			PARLEY_REFRESH=1
+			resolve "$app"
+		fi
 		exit 0 ;;
 	remove)
 		[ $# -eq 2 ] || { echo "usage: parley-launcher remove NAME" >&2; exit 2; }
