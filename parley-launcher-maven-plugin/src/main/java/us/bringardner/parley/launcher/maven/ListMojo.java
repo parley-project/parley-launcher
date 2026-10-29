@@ -43,7 +43,9 @@ import us.bringardner.parley.launcher.Repositories;
  * </pre>
  *
  * {native} is the folder the native jar is unpacked in, {platform} this platform (linux-x86_64,
- * macos-aarch64 ...), both filled in by the launcher when it runs the program.
+ * macos-aarch64 ...) and {app} the program's name, filled in by the launcher when it runs the
+ * program; an option can start with 17+: (Java 17 or later only) or macos:, linux:, windows: (that
+ * platform only). JavaFX's platform jars are listed for whichever platform the program runs on.
  */
 @Mojo(name = "list", defaultPhase = LifecyclePhase.PREPARE_PACKAGE, requiresDependencyResolution = ResolutionScope.RUNTIME, threadSafe = true)
 public class ListMojo extends AbstractMojo {
@@ -69,6 +71,13 @@ public class ListMojo extends AbstractMojo {
 	 */
 	@Parameter
 	private String nativeClassifier;
+
+	/**
+	 * Instead of nativeClassifier: the dependency (group:artifact) whose {platform} jar of native
+	 * files the program uses, as fsh-ide and fshdb use fsh's
+	 */
+	@Parameter
+	private String nativeFrom;
 
 	/** Whether the program runs without its native files (on a platform nobody built them for) */
 	@Parameter(defaultValue = "true")
@@ -108,6 +117,19 @@ public class ListMojo extends AbstractMojo {
 		if( nativeClassifier != null && !nativeClassifier.trim().isEmpty() ) {
 			list.nativeArtifact = list.artifact.withClassifier(tokens(nativeClassifier.trim())).toString();
 			list.nativeOptional = nativeOptional;
+		} else if( nativeFrom != null && !nativeFrom.trim().isEmpty() ) {
+			Artifact from = null;
+			for(Artifact a : project.getArtifacts()) {
+				if( nativeFrom.trim().equals(a.getGroupId() + ":" + a.getArtifactId()) && a.getClassifier() == null ) {
+					from = a;
+				}
+			}
+			if( from == null ) {
+				throw new MojoExecutionException("nativeFrom " + nativeFrom + " is not a dependency of " + project.getArtifactId());
+			}
+			list.nativeArtifact = new Coordinates(from.getGroupId(), from.getArtifactId(), "jar", "${platform}",
+					from.getBaseVersion()).toString();
+			list.nativeOptional = nativeOptional;
 		}
 		for(String w : wrapper) {
 			list.wrapper.add(tokens(w));
@@ -142,7 +164,11 @@ public class ListMojo extends AbstractMojo {
 			Coordinates c = new Coordinates(a.getGroupId(), a.getArtifactId(),
 					a.getArtifactHandler().getExtension(), a.getClassifier(), a.getBaseVersion());
 			String sha = null;
-			if( !a.isSnapshot() ) {
+			if( "org.openjfx".equals(a.getGroupId()) && a.getClassifier() != null && !a.getClassifier().isEmpty() ) {
+				// (JavaFX's platform jar: the classifier is the build machine's platform; the launcher
+				// takes the one for where the program runs, and Maven Central's .sha1 checks it)
+				c = c.withClassifier("${javafx.platform}");
+			} else if( !a.isSnapshot() ) {
 				try {
 					sha = Repositories.digest(f.toPath(), "SHA-256");
 				} catch (LaunchException e) {
@@ -192,6 +218,7 @@ public class ListMojo extends AbstractMojo {
 
 	/** {native} and {platform} as the list writes them */
 	private static String tokens(String s) {
-		return s.replace("{native}", "${native}").replace("{platform}", "${platform}").replace("$${", "${");
+		return s.replace("{native}", "${native}").replace("{platform}", "${platform}").replace("{app}", "${app}")
+				.replace("$${", "${");
 	}
 }

@@ -424,6 +424,32 @@ class LauncherTest {
 	}
 
 	@Test
+	void anotherMainClassPlatformOptionsAndTheAppsName() throws Exception {
+		String other = Locations.platform().startsWith("macos-") ? "linux" : "macos";
+		File appFile = app(LaunchList.HEADER + "\nmain=org.x.Main\noption=" + Locations.platform().split("-")[0]
+				+ ":-Dname=${app}\noption=" + other + ":-Dno=1\noption=" + Locations.platform().split("-")[0] + ":999+:-Dno=2\n");
+		Files.write(appFile.toPath(), "artifact=org.x:app:1.0\nmain=org.x.fx.Other\n".getBytes(StandardCharsets.UTF_8));
+		Resolver.Launch l = new Resolver(where, notes::add).resolve("app-fx", appFile, "java");
+		assertEquals("org.x.fx.Other", l.command.get(l.command.size() - 1));
+		assertTrue(l.command.contains("-Dname=app-fx"), l.command.toString());
+		assertFalse(l.command.contains("-Dno=1"), l.command.toString());
+		assertFalse(l.command.contains("-Dno=2"), l.command.toString());
+	}
+
+	@Test
+	void javafxForThisPlatform() throws Exception {
+		String fx = Resolver.javafxPlatform(Locations.platform());
+		Coordinates base = Coordinates.parse("org.openjfx:javafx-base:jar:" + fx + ":21");
+		publish(base, jar("fx", fx));
+		File appFile = app(LaunchList.HEADER + "\nmain=org.x.Main\ndependency=org.openjfx:javafx-base:jar:${javafx.platform}:21\n");
+		Resolver.Launch l = new Resolver(where, notes::add).resolve("app", appFile, "java");
+		String cp = l.command.get(l.command.indexOf("-cp") + 1);
+		assertTrue(cp.contains("javafx-base-21-" + fx + ".jar"), cp);
+		assertEquals("mac-aarch64", Resolver.javafxPlatform("macos-aarch64"));
+		assertEquals("win", Resolver.javafxPlatform("windows-x86_64"));
+	}
+
+	@Test
 	void mavenSettingsLocalRepository() throws IOException {
 		File home = tmp.resolve("h").toFile();
 		assertEquals(new File(home, ".m2/repository"), Locations.mavenLocalRepository(home));

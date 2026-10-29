@@ -271,7 +271,7 @@ public final class Repositories {
 	}
 
 	/** How many times a download is tried when the server is busy (429, 5xx) or the connection fails */
-	static final int ATTEMPTS = 4;
+	static final int ATTEMPTS = 6;
 
 	private int get(String url, Path to) throws IOException, InterruptedException, LaunchException {
 		return send(url, HttpResponse.BodyHandlers.ofFile(to)).statusCode();
@@ -285,7 +285,7 @@ public final class Repositories {
 		return r.body();
 	}
 
-	/** GET, again after a pause (Retry-After, else 1, 2, 4 s) while the server is busy or unreachable */
+	/** GET, again after a pause (Retry-After, else 1, 2, 4, 8, 16 s) while the server is busy or unreachable */
 	private <T> HttpResponse<T> send(String url, HttpResponse.BodyHandler<T> body)
 			throws IOException, InterruptedException, LaunchException {
 		for(int attempt = 1;; attempt++) {
