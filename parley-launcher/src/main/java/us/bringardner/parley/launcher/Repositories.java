@@ -199,6 +199,10 @@ public final class Repositories {
 				break;
 			}
 		}
+		if( value == null && xml.contains("<snapshotVersions>") ) {
+			// (the build lists its files, and this one isn't among them: it wasn't published)
+			return null;
+		}
 		if( value == null || value.isEmpty() ) {
 			// (older metadata: only the timestamp and build number)
 			String ts = element(xml, "timestamp");
@@ -274,7 +278,9 @@ public final class Repositories {
 			}
 			name = snapshotFileName(c, r.body());
 			if( name == null ) {
-				throw new LaunchException(metaUrl + " names no build of " + c);
+				// (a file the build didn't publish, such as one platform's native jar: looked for again a day later)
+				checks.add("until " + (System.currentTimeMillis() / 1000 + SNAPSHOT_CHECK_SECONDS));
+				throw new LaunchException(c + " is not on " + where.snapshots + " (its newest build has no such file)");
 			}
 		} catch (IOException | LaunchException e) {
 			if( e instanceof LaunchException && !((LaunchException) e).isTemporary() ) {
@@ -303,6 +309,9 @@ public final class Repositories {
 			Files.createDirectories(target.getParentFile().toPath());
 			part = Files.createTempFile(target.getParentFile().toPath(), name, ".part");
 			int status = get(url, part);
+			if( status == 404 ) {
+				throw new LaunchException(c + " is not on " + where.snapshots + " (" + url + ")");
+			}
 			if( status != 200 ) {
 				throw new LaunchException("downloading " + c + " from " + url + ": HTTP " + status).temporary();
 			}

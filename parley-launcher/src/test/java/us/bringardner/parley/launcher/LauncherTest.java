@@ -726,4 +726,18 @@ class LauncherTest {
 		assertNull(l.snapshots);
 		assertEquals(Locations.DEFAULT_SNAPSHOTS, Locations.fromEnvironment(Map.of(), tmp.toString(), false).snapshots);
 	}
+
+	@Test
+	void aFileTheBuildDidNotPublishIsNotTriedAtEveryStart() throws Exception {
+		where = withSnapshots(false);
+		Coordinates c = Coordinates.parse("org.x:lib:1.0-SNAPSHOT");
+		publishSnapshot(c, "20261031.120000", 3, jar("a", "3"));
+		Coordinates nat = c.withClassifier("linux-x86_64");
+		List<String> checks = new ArrayList<>();
+		LaunchException e = assertThrows(LaunchException.class, () -> new Repositories(where, notes::add).find(nat, null, checks));
+		assertFalse(e.isTemporary(), e.getMessage());
+		assertTrue(e.getMessage().contains("no such file"), e.getMessage());
+		assertTrue(checks.stream().anyMatch(x -> x.startsWith("until ")), checks.toString());
+		assertNull(asked.get("snapshots/org/x/lib/1.0-SNAPSHOT/lib-1.0-20261031.120000-3-linux-x86_64.jar"));
+	}
 }
