@@ -9,7 +9,7 @@
 # PREFIX is /usr/local/lib/parley/launcher (BIN /usr/local/bin), or with --user
 # ~/.parley/launcher (BIN ~/.local/bin). Then add the programs, for example:
 #
-#   parley-launcher add fsh us.bringardner:fsh:2.0.0
+#   parley-launcher add fsh                      (picks the version; or fsh:2.0.0, us.bringardner:fsh:2.0.0)
 #
 # Usage: ./install.sh [--user] [--prefix DIR] [--bin DIR] [--uninstall]
 # Running it again (from a newer one) upgrades: bin and lib are replaced, apps are kept.
@@ -106,7 +106,7 @@ $SUDO ln -sf "$prefix/bin/parley-launcher" "$bin/parley-launcher"
 # (the programs already added keep their links: an upgrade replaced only what they point at)
 
 echo "parley-launcher installed in $prefix, with $bin/parley-launcher"
-echo "add a program with: parley-launcher add NAME GROUP:ARTIFACT:VERSION"
+echo "add a program with: parley-launcher add NAME [[GROUP:]ARTIFACT[:VERSION]] (parley-launcher --help)"
 case :$PATH: in
 *:"$bin":*) ;;
 *) echo "note: $bin is not on your PATH; add it to run the programs by name" ;;

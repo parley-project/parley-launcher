@@ -8,7 +8,7 @@ Maven Central, then runs it. The programs share their jars the way Maven project
 
 ```sh
 tar xzf parley-launcher-2.0.0.tar.gz && parley-launcher-2.0.0/install.sh   # or --user
-parley-launcher add fsh fsh        # pick the version; the newest release is the default
+parley-launcher add fsh            # pick the version; the newest release is the default
 fsh
 ```
 
@@ -51,24 +51,26 @@ fsh
 
 | Command | |
 |---|---|
-| `parley-launcher add NAME [GROUP:]ARTIFACT[:VERSION]` | Add a program (see below for leaving out the group or version): `PREFIX/apps/NAME.properties`, a link `NAME` beside the launcher and in the bin folder, and its command made at once (so a missing jar shows now). As root (`sudo`, for a system-wide install), each user's command is made at their own first start instead, so root never writes into a user's `~/.m2`. It refuses a name that is already some other command |
+| `parley-launcher add NAME [[GROUP:]ARTIFACT[:VERSION]]` | Add a program (see below for leaving out the artifact, group or version): `PREFIX/apps/NAME.properties`, a link `NAME` beside the launcher and in the bin folder, and its command made at once (so a missing jar shows now). As root (`sudo`, for a system-wide install), each user's command is made at their own first start instead, so root never writes into a user's `~/.m2`. It refuses a name that is already some other command |
 | `parley-launcher versions [GROUP:]ARTIFACT` | The versions found, newest first, the default marked |
 | `parley-launcher remove NAME` | Remove one |
 | `parley-launcher list` | The programs and their artifacts |
 | `parley-launcher command NAME` | The command NAME runs, one word a line |
 
-The group and the version can be left out of `add`:
+The artifact, the group and the version can be left out of `add`:
 
-1. **No group** (`fsh`, `fsh:2.0.0`): the artifact is looked for in `us.bringardner`, then
+1. **No artifact** (`parley-launcher add fsh`): the program's name is the artifact. To name
+   another main class (the fourth argument), the artifact must be given.
+2. **No group** (`fsh`, `fsh:2.0.0`): the artifact is looked for in `us.bringardner`, then
    `us.bringardner.parley`. A second part that starts with a digit is a version (`fsh:2.0.0`);
    otherwise it is the group and the artifact (`us.bringardner.parley:parley-ssh`).
-2. **No version**: the versions on Maven Central (its `maven-metadata.xml`) and in the machine and
+3. **No version**: the versions on Maven Central (its `maven-metadata.xml`) and in the machine and
    user repositories (a SNAPSHOT that `mvn install` put there) are listed, newest first, and you
    pick one by its number or its version. Enter takes the default: the newest release, or the
    newest SNAPSHOT when there is no release. With only one version there is no question; with no
    answer at all (no terminal) the default is taken. When the artifact is in both groups, both
    are listed. `PARLEY_OFFLINE=true`, or Central out of reach, lists this machine's versions only.
-3. The app file always gets the full `group:artifact:version` that was picked, so the program
+4. The app file always gets the full `group:artifact:version` that was picked, so the program
    doesn't change version until it is added again.
 
 `install.sh` installs the launcher in `/usr/local/lib/parley/launcher`, linked from
@@ -80,7 +82,7 @@ programs' links (the jars stay in the repositories, which are Maven's too).
 
 | Command | Add it with |
 |---|---|
-| `fsh` | `parley-launcher add fsh fsh` (or `us.bringardner:fsh:VERSION`) |
+| `fsh` | `parley-launcher add fsh` (or `us.bringardner:fsh:VERSION`) |
 | `fsh-ide` | `parley-launcher add fsh-ide us.bringardner:fsh-ide:VERSION` |
 | `fsh-ide-fx` (JavaFX) | `parley-launcher add fsh-ide-fx us.bringardner:fsh-ide:VERSION us.bringardner.fsh.ide.fx.FshIdeFx` |
 | `fshdb` | `parley-launcher add fshdb us.bringardner:fshdb:VERSION` |
