@@ -584,4 +584,146 @@ class LauncherTest {
 		assertEquals("us.bringardner:fsh:2.0.0-SNAPSHOT", choose("fsh", "", new StringBuilder()).toString());
 		assertTrue(notes.stream().anyMatch(n -> n.contains("can't be reached")), notes.toString());
 	}
+
+	// ---- SNAPSHOTs from Central's snapshot repository
+
+	/** the locations with a snapshot repository: the stand-in's /maven2/snapshots/ */
+	Locations withSnapshots(boolean offline) {
+		Locations l = locations(offline);
+		return new Locations(l.machineRepository, l.userRepository, l.central, l.central + "snapshots/", l.launcherHome,
+				l.systemRoot, l.userRoot, offline);
+	}
+
+	/** put a build of SNAPSHOT c on the stand-in's snapshot repository, its metadata naming it the newest */
+	void publishSnapshot(Coordinates c, String timestamp, int build, byte[] data) throws Exception {
+		String dir = "snapshots/" + c.groupId.replace('.', '/') + "/" + c.artifactId + "/" + c.version + "/";
+		String value = c.version.replace("SNAPSHOT", timestamp + "-" + build);
+		String name = c.artifactId + "-" + value + (c.classifier.isEmpty() ? "" : "-" + c.classifier) + "." + c.type;
+		central.put(dir + name, data);
+		central.put(dir + name + ".sha1", sha(data, "SHA-1").getBytes(StandardCharsets.UTF_8));
+		central.put(dir + "maven-metadata.xml", ("<metadata><groupId>" + c.groupId + "</groupId><artifactId>" + c.artifactId
+				+ "</artifactId><version>" + c.version + "</version><versioning><snapshot><timestamp>" + timestamp
+				+ "</timestamp><buildNumber>" + build + "</buildNumber></snapshot><snapshotVersions>"
+				+ "<snapshotVersion><extension>pom</extension><value>" + value + "</value></snapshotVersion>"
+				+ "<snapshotVersion><classifier>" + c.classifier + "</classifier><extension>" + c.type + "</extension><value>" + value
+				+ "</value></snapshotVersion></snapshotVersions></versioning></metadata>").getBytes(StandardCharsets.UTF_8));
+	}
+
+	@Test
+	void aSnapshotNotInstalledIsDownloaded() throws Exception {
+		where = withSnapshots(false);
+		Coordinates c = Coordinates.parse("org.x:lib:1.0-SNAPSHOT");
+		publishSnapshot(c, "20261031.120000", 3, jar("a", "3"));
+		List<String> checks = new ArrayList<>();
+		File f = new Repositories(where, notes::add).find(c, null, checks);
+		assertEquals("lib-1.0-20261031.120000-3.jar", f.getName());
+		assertEquals(new File(where.userRepository, c.path()).getParentFile(), f.getParentFile());
+		assertTrue(new File(f.getPath() + ".sha1").isFile());
+		// (mvn install's file coming to be there, or a day passing, makes the command again)
+		assertTrue(checks.contains("!" + new File(where.userRepository, c.path()).getAbsolutePath()), checks.toString());
+		assertTrue(checks.stream().anyMatch(x -> x.startsWith("until ")), checks.toString());
+		// (the same build again: not downloaded again)
+		int before = asked.get("snapshots/org/x/lib/1.0-SNAPSHOT/lib-1.0-20261031.120000-3.jar").get();
+		assertEquals(f, new Repositories(where, notes::add).find(c, null));
+		assertEquals(before, asked.get("snapshots/org/x/lib/1.0-SNAPSHOT/lib-1.0-20261031.120000-3.jar").get());
+		// (a newer build: that one)
+		publishSnapshot(c, "20261101.080000", 4, jar("a", "4"));
+		assertEquals("lib-1.0-20261101.080000-4.jar", new Repositories(where, notes::add).find(c, null).getName());
+	}
+
+	@Test
+	void anInstalledSnapshotStillComesFirst() throws Exception {
+		where = withSnapshots(false);
+		Coordinates c = Coordinates.parse("org.x:lib:1.0-SNAPSHOT");
+		publishSnapshot(c, "20261031.120000", 3, jar("a", "3"));
+		put(where.userRepository, c, jar("a", "mine"));
+		assertEquals(new File(where.userRepository, c.path()), new Repositories(where, notes::add).find(c, null));
+		assertTrue(asked.isEmpty(), asked.toString());
+	}
+
+	@Test
+	void aSnapshotWithAClassifier() throws Exception {
+		where = withSnapshots(false);
+		Coordinates c = Coordinates.parse("org.x:lib:jar:linux-x86_64:1.0-SNAPSHOT");
+		publishSnapshot(c, "20261031.120000", 3, jar("n", "n"));
+		assertEquals("lib-1.0-20261031.120000-3-linux-x86_64.jar", new Repositories(where, notes::add).find(c, null).getName());
+	}
+
+	@Test
+	void aDownloadedSnapshotThatDoesNotMatchIsRefused() throws Exception {
+		where = withSnapshots(false);
+		Coordinates c = Coordinates.parse("org.x:lib:1.0-SNAPSHOT");
+		publishSnapshot(c, "20261031.120000", 3, jar("a", "3"));
+		central.put("snapshots/org/x/lib/1.0-SNAPSHOT/lib-1.0-20261031.120000-3.jar.sha1", "0000".getBytes(StandardCharsets.UTF_8));
+		LaunchException e = assertThrows(LaunchException.class, () -> new Repositories(where, notes::add).find(c, null));
+		assertTrue(e.getMessage().contains("does not match"), e.getMessage());
+		assertNull(new Repositories(where, notes::add).cachedSnapshot(c));
+	}
+
+	@Test
+	void aSnapshotOnNeitherSaysWhatToDo() {
+		where = withSnapshots(false);
+		Coordinates c = Coordinates.parse("org.x:lib:1.0-SNAPSHOT");
+		LaunchException e = assertThrows(LaunchException.class, () -> new Repositories(where, notes::add).find(c, null));
+		assertTrue(e.getMessage().contains("is not on") && e.getMessage().contains("mvn install in lib's project"), e.getMessage());
+		assertFalse(e.isTemporary());
+	}
+
+	@Test
+	void withoutTheNetworkTheBuildDownloadedBeforeIsUsed() throws Exception {
+		where = withSnapshots(false);
+		Coordinates c = Coordinates.parse("org.x:lib:1.0-SNAPSHOT");
+		publishSnapshot(c, "20261031.120000", 3, jar("a", "3"));
+		File f = new Repositories(where, notes::add).find(c, null);
+		// (offline: no question asked)
+		asked.clear();
+		assertEquals(f, new Repositories(withSnapshots(true), notes::add).find(c, null));
+		assertTrue(asked.isEmpty(), asked.toString());
+		// (the repository busy: noted, and looked for again at the next start)
+		busy.put("snapshots/org/x/lib/1.0-SNAPSHOT/maven-metadata.xml", new AtomicInteger(100));
+		List<String> checks = new ArrayList<>();
+		assertEquals(f, new Repositories(where, notes::add).find(c, null, checks));
+		assertTrue(checks.contains("retry"), checks.toString());
+		assertTrue(notes.stream().anyMatch(n -> n.contains("downloaded before is used")), notes.toString());
+	}
+
+	@Test
+	void theNewestBuildDownloadedBefore() throws IOException {
+		where = withSnapshots(true);
+		Coordinates c = Coordinates.parse("org.x:lib:1.0-SNAPSHOT");
+		File dir = new File(where.userRepository, c.path()).getParentFile();
+		dir.mkdirs();
+		for(String n : new String[] { "lib-1.0-20261031.120000-9.jar", "lib-1.0-20261031.120000-10.jar", "lib-1.0-20261030.235959-11.jar",
+				"lib-1.0-20261031.120000-10.jar.sha1", "lib-1.0-20261031.120000-12-sources.jar" }) {
+			Files.write(new File(dir, n).toPath(), new byte[] { 1 });
+		}
+		assertEquals("lib-1.0-20261031.120000-10.jar", new Repositories(where, notes::add).cachedSnapshot(c).getName());
+	}
+
+	@Test
+	void olderMetadataTimestampAndBuildNumber() {
+		Coordinates c = Coordinates.parse("org.x:lib:1.0-SNAPSHOT");
+		assertEquals("lib-1.0-20261031.120000-7.jar", Repositories.snapshotFileName(c,
+				"<metadata><versioning><snapshot><timestamp>20261031.120000</timestamp><buildNumber>7</buildNumber></snapshot></versioning></metadata>"));
+		assertNull(Repositories.snapshotFileName(c, "<metadata/>"));
+	}
+
+	@Test
+	void snapshotRepositoryVersionsAreListed() throws Exception {
+		where = withSnapshots(false);
+		metadata("us.bringardner", "fsh", "1.0.0");
+		central.put("snapshots/us/bringardner/fsh/maven-metadata.xml", ("<metadata><versioning><versions><version>2.0.0-SNAPSHOT</version>"
+				+ "</versions></versioning></metadata>").getBytes(StandardCharsets.UTF_8));
+		StringBuilder shown = new StringBuilder();
+		assertEquals("us.bringardner:fsh:2.0.0-SNAPSHOT", choose("fsh", "1\n", shown).toString());
+		assertTrue(shown.toString().contains("us.bringardner:fsh:2.0.0-SNAPSHOT\n") || shown.toString().contains("us.bringardner:fsh:2.0.0-SNAPSHOT" + System.lineSeparator()),
+				shown.toString());
+	}
+
+	@Test
+	void snapshotsNoneSetsNoRepository() {
+		Locations l = Locations.fromEnvironment(Map.of("PARLEY_SNAPSHOTS", "none"), tmp.toString(), false);
+		assertNull(l.snapshots);
+		assertEquals(Locations.DEFAULT_SNAPSHOTS, Locations.fromEnvironment(Map.of(), tmp.toString(), false).snapshots);
+	}
 }

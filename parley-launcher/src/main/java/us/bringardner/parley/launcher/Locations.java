@@ -17,6 +17,9 @@ import java.util.regex.Pattern;
  *   user repository      ~/.m2/repository, or settings.xml's  PARLEY_USER_REPOSITORY
  *                        localRepository, as Maven has it
  *   Maven Central        https://repo1.maven.org/maven2/     PARLEY_CENTRAL
+ *   SNAPSHOTs            https://central.sonatype.com/repository/maven-snapshots/
+ *                        (Central's snapshot repository)     PARLEY_SNAPSHOTS (none: no SNAPSHOT
+ *                                                            is downloaded)
  *   the launcher's own   ~/.parley/launcher (cache, native)  PARLEY_LAUNCHER_HOME
  *   system root          /usr/local/lib/parley                (as parley-core's PluginFolders)
  *   user root            ~/.parley
@@ -27,10 +30,13 @@ import java.util.regex.Pattern;
 public final class Locations {
 
 	public static final String DEFAULT_CENTRAL = "https://repo1.maven.org/maven2/";
+	public static final String DEFAULT_SNAPSHOTS = "https://central.sonatype.com/repository/maven-snapshots/";
 
 	public final File machineRepository;
 	public final File userRepository;
 	public final String central;
+	/** where a SNAPSHOT that isn't on this machine is downloaded from; null: none is */
+	public final String snapshots;
 	public final File launcherHome;
 	public final File systemRoot;
 	public final File userRoot;
@@ -38,9 +44,16 @@ public final class Locations {
 
 	public Locations(File machineRepository, File userRepository, String central, File launcherHome,
 			File systemRoot, File userRoot, boolean offline) {
+		this(machineRepository, userRepository, central, null, launcherHome, systemRoot, userRoot, offline);
+	}
+
+	public Locations(File machineRepository, File userRepository, String central, String snapshots, File launcherHome,
+			File systemRoot, File userRoot, boolean offline) {
 		this.machineRepository = machineRepository;
 		this.userRepository = userRepository;
 		this.central = central.endsWith("/") ? central : central + "/";
+		this.snapshots = snapshots == null || snapshots.isEmpty() || "none".equalsIgnoreCase(snapshots) ? null
+				: snapshots.endsWith("/") ? snapshots : snapshots + "/";
 		this.launcherHome = launcherHome;
 		this.systemRoot = systemRoot;
 		this.userRoot = userRoot;
@@ -65,11 +78,12 @@ public final class Locations {
 				? new File(env.get("PARLEY_USER_REPOSITORY"))
 				: mavenLocalRepository(home);
 		String central = env.getOrDefault("PARLEY_CENTRAL", DEFAULT_CENTRAL);
+		String snapshots = env.getOrDefault("PARLEY_SNAPSHOTS", DEFAULT_SNAPSHOTS);
 		File launcher = env.containsKey("PARLEY_LAUNCHER_HOME")
 				? new File(env.get("PARLEY_LAUNCHER_HOME"))
 				: new File(new File(home, ".parley"), "launcher");
 		boolean offline = "true".equalsIgnoreCase(env.get("PARLEY_OFFLINE"));
-		return new Locations(machine, user, central, launcher, sysRoot, new File(home, ".parley"), offline);
+		return new Locations(machine, user, central, snapshots, launcher, sysRoot, new File(home, ".parley"), offline);
 	}
 
 	private static final Pattern LOCAL_REPOSITORY = Pattern.compile("<localRepository>\\s*([^<]+?)\\s*</localRepository>");
