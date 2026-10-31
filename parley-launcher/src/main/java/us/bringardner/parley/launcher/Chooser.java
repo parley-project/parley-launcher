@@ -22,8 +22,8 @@ import java.util.function.Consumer;
  * </pre>
  *
  * Without a group, the artifact is looked for in us.bringardner, then us.bringardner.parley.
- * Without a version, the versions found (on Maven Central, and in the machine and user
- * repositories, where mvn install puts a SNAPSHOT) are listed, newest first, and the person picks
+ * Without a version, the versions found (on Maven Central and its snapshot repository, and in the
+ * machine and user repositories, where mvn install puts a SNAPSHOT) are listed, newest first, and the person picks
  * one; the default is the newest release, or the newest SNAPSHOT when there is no release.
  */
 public final class Chooser {
@@ -96,6 +96,15 @@ public final class Chooser {
 			} catch (LaunchException e) {
 				unreachable = e;
 			}
+			try {
+				for(String v : repositories.snapshotVersions(g, s[1])) {
+					if( !all.contains(v) ) {
+						all.add(v);
+					}
+				}
+			} catch (LaunchException e) {
+				unreachable = unreachable == null ? e : unreachable;
+			}
 			for(String v : all) {
 				if( s[2] == null || s[2].equals(v) ) {
 					ret.add(new Found(new Coordinates(g, s[1], "jar", "", v), local.contains(v)));
@@ -106,7 +115,7 @@ public final class Chooser {
 			if( ret.isEmpty() ) {
 				throw new LaunchException("can't list the versions of " + spec + " on Maven Central: " + unreachable.getMessage(), unreachable);
 			}
-			warn.accept("Maven Central can't be reached (" + unreachable.getMessage() + "): only the versions on this machine are listed");
+			warn.accept("Maven Central can't be reached (" + unreachable.getMessage() + "): some versions may be missing from the list");
 		}
 		// (stable: for the same version, us.bringardner before us.bringardner.parley)
 		ret.sort((a, b) -> Coordinates.compareVersions(b.coordinates.version, a.coordinates.version));

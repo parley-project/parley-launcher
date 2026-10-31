@@ -29,6 +29,12 @@ import java.util.function.Consumer;
  * written as Maven writes it (the .pom and .sha1 files beside the jar, and _remote.repositories), so
  * Maven takes it as its own. A release is checked against the SHA-256 the program's list gives for
  * it, else against the .sha1 Maven Central publishes; one that doesn't match is not used.
+ *
+ * A SNAPSHOT that mvn install hasn't put on this machine is downloaded from Central's snapshot
+ * repository (Locations.snapshots): its newest build, named as Maven names it
+ * (artifact-2.0.0-20261031.120000-3.jar) beside where mvn install puts its own, so an installed
+ * one still comes first; checked against the .sha1 published with it. A command made with one is
+ * made again a day later ("until" in its checks), when a newer build may be there.
  */
 public final class Repositories {
 
@@ -78,8 +84,9 @@ public final class Repositories {
 		}
 		try {
 			if( c.isSnapshot() ) {
-				throw new LaunchException(c + " is not installed in " + where.userRepository
-						+ ": a SNAPSHOT is not downloaded; run mvn install in " + c.artifactId + "'s project");
+				File ret = findRemoteSnapshot(c, checks);
+				absentBefore(order, order.length, c, checks);
+				return ret;
 			}
 			if( where.offline ) {
 				throw new LaunchException(c + " is not in " + where.machineRepository + " or " + where.userRepository
@@ -104,11 +111,25 @@ public final class Repositories {
 	 * @throws LaunchException when Central can't be reached
 	 */
 	public List<String> centralVersions(String group, String artifact) throws LaunchException {
+		return listedVersions(where.central, group, artifact);
+	}
+
+	/**
+	 * The versions of group:artifact that Central's snapshot repository lists; empty when it has
+	 * none, when offline, or when no SNAPSHOT is downloaded (PARLEY_SNAPSHOTS=none)
+	 *
+	 * @throws LaunchException when it can't be reached
+	 */
+	public List<String> snapshotVersions(String group, String artifact) throws LaunchException {
+		return where.snapshots == null ? new ArrayList<>() : listedVersions(where.snapshots, group, artifact);
+	}
+
+	private List<String> listedVersions(String base, String group, String artifact) throws LaunchException {
 		List<String> ret = new ArrayList<>();
 		if( where.offline ) {
 			return ret;
 		}
-		String url = where.central + group.replace('.', '/') + "/" + artifact + "/maven-metadata.xml";
+		String url = base + group.replace('.', '/') + "/" + artifact + "/maven-metadata.xml";
 		try {
 			// (tried only twice: a list to pick from, not a download; this machine's versions are listed either way)
 			HttpResponse<String> r = send(url, HttpResponse.BodyHandlers.ofString(), METADATA_ATTEMPTS);
@@ -150,6 +171,165 @@ public final class Repositories {
 			}
 		}
 		return ret;
+	}
+
+	/** How long a command made with a downloaded SNAPSHOT is used before a newer build is looked for */
+	static final long SNAPSHOT_CHECK_SECONDS = 24 * 60 * 60;
+
+	private static final java.util.regex.Pattern SNAPSHOT_VERSION = java.util.regex.Pattern.compile("(?s)<snapshotVersion>(.*?)</snapshotVersion>");
+
+	/** The text of an element in xml, or "" when it has none */
+	private static String element(String xml, String name) {
+		java.util.regex.Matcher m = java.util.regex.Pattern.compile("<" + name + ">\\s*([^<]*?)\\s*</" + name + ">").matcher(xml);
+		return m.find() ? m.group(1) : "";
+	}
+
+	/**
+	 * The file name a SNAPSHOT's build has: artifact-VALUE[-classifier].type, VALUE as the
+	 * repository's maven-metadata.xml gives it (2.0.0-20261031.120000-3); null when it lists none
+	 */
+	static String snapshotFileName(Coordinates c, String metadata) {
+		String xml = metadata.replaceAll("(?s)<!--.*?-->", "");
+		String value = null;
+		java.util.regex.Matcher m = SNAPSHOT_VERSION.matcher(xml);
+		while (m.find()) {
+			String sv = m.group(1);
+			if( element(sv, "extension").equals(c.type) && element(sv, "classifier").equals(c.classifier) ) {
+				value = element(sv, "value");
+				break;
+			}
+		}
+		if( value == null || value.isEmpty() ) {
+			// (older metadata: only the timestamp and build number)
+			String ts = element(xml, "timestamp");
+			String bn = element(xml, "buildNumber");
+			if( ts.isEmpty() || bn.isEmpty() ) {
+				return null;
+			}
+			value = c.version.substring(0, c.version.length() - "SNAPSHOT".length()) + ts + "-" + bn;
+		}
+		return c.artifactId + "-" + value + (c.classifier.isEmpty() ? "" : "-" + c.classifier) + "." + c.type;
+	}
+
+	/** The newest build of the SNAPSHOT c downloaded before, in the user repository; null when there is none */
+	File cachedSnapshot(Coordinates c) {
+		File dir = new File(where.userRepository, c.path()).getParentFile();
+		String base = c.artifactId + "-" + c.version.substring(0, c.version.length() - "SNAPSHOT".length());
+		String tail = (c.classifier.isEmpty() ? "" : "-" + c.classifier) + "." + c.type;
+		java.util.regex.Pattern build = java.util.regex.Pattern.compile(java.util.regex.Pattern.quote(base)
+				+ "(\\d{8}\\.\\d{6})-(\\d+)" + java.util.regex.Pattern.quote(tail));
+		File best = null;
+		String bestKey = null;
+		File[] files = dir.listFiles();
+		if( files != null ) {
+			for(File f : files) {
+				java.util.regex.Matcher m = build.matcher(f.getName());
+				if( f.isFile() && m.matches() ) {
+					String key = m.group(1) + String.format("-%09d", Long.parseLong(m.group(2)));
+					if( bestKey == null || key.compareTo(bestKey) > 0 ) {
+						best = f;
+						bestKey = key;
+					}
+				}
+			}
+		}
+		return best;
+	}
+
+	/**
+	 * The SNAPSHOT c from Central's snapshot repository: its newest build, downloaded unless it was
+	 * already. Without the network, the newest build downloaded before is used (and looked for again
+	 * at the next start).
+	 */
+	private File findRemoteSnapshot(Coordinates c, List<String> checks) throws LaunchException {
+		String install = ": run mvn install in " + c.artifactId + "'s project";
+		if( where.snapshots == null ) {
+			throw new LaunchException(c + " is not installed in " + where.userRepository
+					+ " (PARLEY_SNAPSHOTS=none: a SNAPSHOT is not downloaded)" + install);
+		}
+		File cached = cachedSnapshot(c);
+		if( where.offline ) {
+			if( cached != null ) {
+				return cached;
+			}
+			throw new LaunchException(c + " is not installed in " + where.userRepository
+					+ " (PARLEY_OFFLINE: nothing is downloaded)" + install).temporary();
+		}
+		String dirPath = c.groupId.replace('.', '/') + "/" + c.artifactId + "/" + c.version + "/";
+		String metaUrl = where.snapshots + dirPath + "maven-metadata.xml";
+		String name;
+		try {
+			HttpResponse<String> r = send(metaUrl, HttpResponse.BodyHandlers.ofString());
+			if( r.statusCode() == 404 ) {
+				if( cached != null ) {
+					warn.accept(c + " is no longer on " + where.snapshots + ": the build downloaded before is used ("
+							+ cached.getName() + ")");
+					return cached;
+				}
+				throw new LaunchException(c + " is not installed in " + where.userRepository + ", and is not on "
+						+ where.snapshots + install);
+			}
+			if( r.statusCode() != 200 ) {
+				throw new LaunchException(metaUrl + ": HTTP " + r.statusCode()).temporary();
+			}
+			name = snapshotFileName(c, r.body());
+			if( name == null ) {
+				throw new LaunchException(metaUrl + " names no build of " + c);
+			}
+		} catch (IOException | LaunchException e) {
+			if( e instanceof LaunchException && !((LaunchException) e).isTemporary() ) {
+				throw (LaunchException) e;
+			}
+			if( cached != null ) {
+				warn.accept("can't look for a newer " + c + " (" + e.getMessage() + "): the build downloaded before is used ("
+						+ cached.getName() + ")");
+				checks.add("retry");
+				return cached;
+			}
+			throw new LaunchException("looking for " + c + " on " + where.snapshots + ": " + e.getMessage(), e).temporary();
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			throw new LaunchException("looking for " + c + " was interrupted", e).temporary();
+		}
+		checks.add("until " + (System.currentTimeMillis() / 1000 + SNAPSHOT_CHECK_SECONDS));
+		File target = new File(new File(where.userRepository, c.path()).getParentFile(), name);
+		File sha1File = new File(target.getPath() + ".sha1");
+		if( target.isFile() && sha1File.isFile() && check(target, null) == null ) {
+			return target;
+		}
+		String url = where.snapshots + dirPath + name;
+		Path part = null;
+		try {
+			Files.createDirectories(target.getParentFile().toPath());
+			part = Files.createTempFile(target.getParentFile().toPath(), name, ".part");
+			int status = get(url, part);
+			if( status != 200 ) {
+				throw new LaunchException("downloading " + c + " from " + url + ": HTTP " + status).temporary();
+			}
+			String sha1 = digest(part, "SHA-1");
+			String want = firstWord(getText(url + ".sha1"));
+			if( !want.equals(sha1) ) {
+				throw new LaunchException("the " + c + " downloaded from " + url + " does not match its SHA-1 ("
+						+ sha1 + ", " + url + ".sha1 says " + want + ")");
+			}
+			moveInto(part, target.toPath());
+			part = null;
+			writeText(sha1File.toPath(), sha1);
+			return target;
+		} catch (IOException e) {
+			throw new LaunchException("downloading " + c + " from " + url + ": " + e, e).temporary();
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			throw new LaunchException("downloading " + c + " was interrupted", e).temporary();
+		} finally {
+			if( part != null ) {
+				try {
+					Files.deleteIfExists(part);
+				} catch (IOException e) {
+					// (the next run makes its own)
+				}
+			}
+		}
 	}
 
 	/** "!" + c's path in each of the first n repositories of order: c coming to be there changes things */

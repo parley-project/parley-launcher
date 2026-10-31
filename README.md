@@ -32,13 +32,19 @@ fsh
 4. **Released jars are checked** against the list's SHA-256, wherever they are found; a copy
    that doesn't match is not used, and is downloaded again. A jar the list doesn't cover (the
    program's own, a plugin's) is checked against the `.sha1` Maven Central publishes.
-5. **A SNAPSHOT is never downloaded** (phase 1): it comes from the user repository, after `mvn
-   install` in its project, and isn't checked (it changes with every build). One that isn't
-   there stops the program with a message naming the project to install.
+5. **A SNAPSHOT installed here comes first.** One that `mvn install` put in the user (or machine)
+   repository is used as it is (it changes with every build, so there is nothing to check it
+   against). One that isn't there is downloaded from Central's snapshot repository
+   (`https://central.sonatype.com/repository/maven-snapshots/`): its newest build, kept beside
+   where `mvn install` puts its own, under the name Maven gives a build
+   (`fsh-2.0.0-20261031.120000-3.jar`), and checked against the `.sha1` published with it. A day
+   later the next start looks for a newer build. Without the network, the build downloaded before
+   is used. One on neither stops the program with a message naming the project to install.
 6. **The command is saved.** The first start works out the command (`java`, its options, the
    class path) and saves it in `~/.parley/launcher/cache/NAME.args`, with the files it was made
    from in `NAME.check`. Later starts only check that those files haven't changed, then run it:
-   no other JVM starts, and nothing goes over the network. A newer SNAPSHOT installed, a plugin
+   no other JVM starts, and nothing goes over the network (except once a day for a downloaded
+   SNAPSHOT, as above). A newer SNAPSHOT installed, a plugin
    added, a jar removed or put in the machine repository, a new launcher or a changed
    `settings.xml` makes the command again, and so does a failure that may pass (an optional
    native jar the network didn't deliver).
@@ -64,8 +70,8 @@ The artifact, the group and the version can be left out of `add`:
 2. **No group** (`fsh`, `fsh:2.0.0`): the artifact is looked for in `us.bringardner`, then
    `us.bringardner.parley`. A second part that starts with a digit is a version (`fsh:2.0.0`);
    otherwise it is the group and the artifact (`us.bringardner.parley:parley-ssh`).
-3. **No version**: the versions on Maven Central (its `maven-metadata.xml`) and in the machine and
-   user repositories (a SNAPSHOT that `mvn install` put there) are listed, newest first, and you
+3. **No version**: the versions on Maven Central and its snapshot repository (their
+   `maven-metadata.xml`) and in the machine and user repositories (a SNAPSHOT that `mvn install` put there) are listed, newest first, and you
    pick one by its number or its version. Enter takes the default: the newest release, or the
    newest SNAPSHOT when there is no release. With only one version there is no question; with no
    answer at all (no terminal) the default is taken. When the artifact is in both groups, both
@@ -130,6 +136,7 @@ aren't on Maven Central.
 | `PARLEY_MACHINE_REPOSITORY` | Instead of `/usr/local/lib/parley/repository` |
 | `PARLEY_USER_REPOSITORY` | Instead of `~/.m2/repository` |
 | `PARLEY_CENTRAL` | Instead of `https://repo1.maven.org/maven2/` (a mirror) |
+| `PARLEY_SNAPSHOTS` | Instead of `https://central.sonatype.com/repository/maven-snapshots/`; `none`: a SNAPSHOT not installed here is never downloaded |
 | `PARLEY_LAUNCHER_HOME` | Instead of `~/.parley/launcher` (the saved commands and native files) |
 | `JDK_JAVA_OPTIONS` | More options for java (java itself reads it) |
 | `HTTPS_PROXY` | A proxy for the downloads, when Java's `https.proxyHost` isn't set |
@@ -166,11 +173,10 @@ for where the program runs (`linux`, `mac-aarch64`, `win` ...), checked against 
 
 ## Not yet (phase 2)
 
-1. SNAPSHOTs from GitHub Packages.
-2. Filling the machine repository (`parley-launcher fetch APP --machine`), which is also how a
+1. Filling the machine repository (`parley-launcher fetch APP --machine`), which is also how a
    machine without internet access is filled.
-3. Checking Maven Central's GPG signatures.
-4. A Windows launcher (`parley-launcher.cmd`). The Java part already runs there.
+2. Checking Maven Central's GPG signatures.
+3. A Windows launcher (`parley-launcher.cmd`). The Java part already runs there.
 
 ## Layout
 

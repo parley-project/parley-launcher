@@ -28,6 +28,8 @@
 #   PARLEY_MACHINE_REPOSITORY   instead of /usr/local/lib/parley/repository
 #   PARLEY_USER_REPOSITORY      instead of ~/.m2/repository (or settings.xml's localRepository)
 #   PARLEY_CENTRAL              instead of https://repo1.maven.org/maven2/
+#   PARLEY_SNAPSHOTS            instead of https://central.sonatype.com/repository/maven-snapshots/
+#                               (where a SNAPSHOT not installed here comes from; none: nowhere)
 #   PARLEY_LAUNCHER_HOME        instead of ~/.parley/launcher (the saved commands, native files)
 #   JDK_JAVA_OPTIONS            more options for java (java itself reads it)
 
@@ -58,10 +60,11 @@ home=${PARLEY_LAUNCHER_HOME:-$HOME/.parley/launcher}
 # ---- the saved command
 
 # (what, besides the files it was made from, the saved command depends on)
-key="1|$JAVA_HOME|$PARLEY_JAVA|$PARLEY_MACHINE_REPOSITORY|$PARLEY_USER_REPOSITORY|$PARLEY_CENTRAL|$PARLEY_OFFLINE"
+key="2|$JAVA_HOME|$PARLEY_JAVA|$PARLEY_MACHINE_REPOSITORY|$PARLEY_USER_REPOSITORY|$PARLEY_CENTRAL|$PARLEY_SNAPSHOTS|$PARLEY_OFFLINE"
 
 # true when NAME's saved command is current: its key is this one, and every file it was made from
-# is there and no newer than it ("!" FILE: is still not there)
+# is there and no newer than it ("!" FILE: is still not there; "until SECONDS": that time hasn't come,
+# for a downloaded SNAPSHOT, whose newer build is looked for a day later)
 current() {
 	c=$home/cache/$1
 	[ -f "$c.args" ] && [ -f "$c.check" ] || return 1
@@ -72,6 +75,7 @@ current() {
 		case $f in
 		'') ;;
 		retry) return 1 ;;
+		until\ *) [ "$(date +%s)" -lt "${f#until }" ] || return 1 ;;
 		!*) [ -e "${f#!}" ] && return 1 ;;
 		*) { [ -e "$f" ] && [ ! "$f" -nt "$c.args" ]; } || return 1 ;;
 		esac
@@ -189,7 +193,7 @@ EOF
 # Make NAME's saved command (the launcher works it out, fetching what is missing)
 resolve() {
 	f=$prefix/apps/$1.properties
-	[ -f "$f" ] || die "there is no program $1 here ($f): parley-launcher add $1 GROUP:ARTIFACT:VERSION"
+	[ -f "$f" ] || die "there is no program $1 here ($f): parley-launcher add $1"
 	[ -f "$jar" ] || die "$jar is missing: keep the folder parley-launcher was installed in together"
 	find_java
 	mkdir -p "$home/cache" || exit 1
