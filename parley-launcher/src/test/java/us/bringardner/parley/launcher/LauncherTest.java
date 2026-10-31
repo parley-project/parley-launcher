@@ -458,4 +458,130 @@ class LauncherTest {
 				+ "<localRepository>${user.home}/repo</localRepository></settings>").getBytes(StandardCharsets.UTF_8));
 		assertEquals(new File(home.getPath() + "/repo"), Locations.mavenLocalRepository(home));
 	}
+
+	// ---- picking the group and the version (parley-launcher add NAME [GROUP:]ARTIFACT[:VERSION])
+
+	void metadata(String group, String artifact, String... versions) {
+		StringBuilder b = new StringBuilder("<metadata><groupId>" + group + "</groupId><artifactId>" + artifact
+				+ "</artifactId><versioning><latest>x</latest><release>x</release><versions>");
+		for(String v : versions) {
+			b.append("<version>").append(v).append("</version>");
+		}
+		b.append("</versions></versioning></metadata>");
+		central.put(group.replace('.', '/') + "/" + artifact + "/maven-metadata.xml", b.toString().getBytes(StandardCharsets.UTF_8));
+	}
+
+	Coordinates choose(String spec, String answer, StringBuilder shown) throws LaunchException {
+		java.io.ByteArrayOutputStream o = new java.io.ByteArrayOutputStream();
+		java.io.BufferedReader in = new java.io.BufferedReader(new java.io.StringReader(answer));
+		Coordinates c = new Chooser(new Repositories(where, notes::add), notes::add).choose(spec, in,
+				new java.io.PrintStream(o, true));
+		shown.append(new String(o.toByteArray(), StandardCharsets.UTF_8));
+		return c;
+	}
+
+	@Test
+	void whatIsTypedSplits() throws LaunchException {
+		assertEquals("[null, fsh, null]", java.util.Arrays.toString(Chooser.split("fsh")));
+		assertEquals("[null, fsh, 2.0.0]", java.util.Arrays.toString(Chooser.split("fsh:2.0.0")));
+		assertEquals("[us.bringardner.parley, parley-ssh, null]", java.util.Arrays.toString(Chooser.split("us.bringardner.parley:parley-ssh")));
+		assertEquals("[g, a, 1]", java.util.Arrays.toString(Chooser.split("g:a:1")));
+		assertThrows(LaunchException.class, () -> Chooser.split("fsh:"));
+		assertThrows(LaunchException.class, () -> Chooser.split("a:b:c:d"));
+	}
+
+	@Test
+	void allThreeGivenIsTakenAsItIs() throws LaunchException {
+		StringBuilder shown = new StringBuilder();
+		assertEquals("g:a:9", choose("g:a:9", "", shown).toString());
+		assertTrue(asked.isEmpty(), asked.toString());
+		assertEquals("", shown.toString());
+	}
+
+	@Test
+	void theNewestReleaseIsTheDefault() throws Exception {
+		metadata("us.bringardner", "fsh", "1.0.0", "1.1.0", "1.0.1");
+		put(where.userRepository, Coordinates.parse("us.bringardner:fsh:2.0.0-SNAPSHOT"), jar("x", "y"));
+		StringBuilder shown = new StringBuilder();
+		assertEquals("us.bringardner:fsh:1.1.0", choose("fsh", "\n", shown).toString());
+		String s = shown.toString();
+		assertTrue(s.indexOf("2.0.0-SNAPSHOT (installed)") < s.indexOf("1.1.0  [default]"), s);
+		assertTrue(s.indexOf("1.1.0") < s.indexOf("1.0.1") && s.indexOf("1.0.1") < s.indexOf("1.0.0"), s);
+		assertTrue(s.contains("Which one? [2]"), s);
+	}
+
+	@Test
+	void pickByNumberOrVersion() throws Exception {
+		metadata("us.bringardner", "fsh", "1.0.0", "1.1.0");
+		put(where.userRepository, Coordinates.parse("us.bringardner:fsh:2.0.0-SNAPSHOT"), jar("x", "y"));
+		assertEquals("us.bringardner:fsh:2.0.0-SNAPSHOT", choose("fsh", "1\n", new StringBuilder()).toString());
+		assertEquals("us.bringardner:fsh:1.0.0", choose("fsh", "1.0.0\n", new StringBuilder()).toString());
+		StringBuilder shown = new StringBuilder();
+		assertEquals("us.bringardner:fsh:1.0.0", choose("fsh", "9\nnope\n3\n", shown).toString());
+		assertTrue(shown.toString().contains("Type a number from 1 to 3"), shown.toString());
+		// (no answer at all: the default)
+		assertEquals("us.bringardner:fsh:1.1.0", choose("fsh", "", new StringBuilder()).toString());
+	}
+
+	@Test
+	void onlySnapshotsTheNewestIsTheDefault() throws Exception {
+		put(where.userRepository, Coordinates.parse("us.bringardner:fsh:2.0.0-SNAPSHOT"), jar("x", "y"));
+		put(where.machineRepository, Coordinates.parse("us.bringardner:fsh:2.1.0-SNAPSHOT"), jar("x", "y"));
+		assertEquals("us.bringardner:fsh:2.1.0-SNAPSHOT", choose("fsh", "\n", new StringBuilder()).toString());
+	}
+
+	@Test
+	void oneVersionNoQuestion() throws Exception {
+		metadata("us.bringardner", "fsh", "1.0.0");
+		StringBuilder shown = new StringBuilder();
+		assertEquals("us.bringardner:fsh:1.0.0", choose("fsh", "", shown).toString());
+		assertEquals("", shown.toString());
+	}
+
+	@Test
+	void theGroupIsFoundParleysToo() throws Exception {
+		metadata("us.bringardner.parley", "parley-ssh", "1.0.0");
+		assertEquals("us.bringardner.parley:parley-ssh:1.0.0", choose("parley-ssh", "", new StringBuilder()).toString());
+		// (the version given, the group found)
+		put(where.userRepository, Coordinates.parse("us.bringardner.parley:parley-ssh:2.0.0-SNAPSHOT"), jar("x", "y"));
+		assertEquals("us.bringardner.parley:parley-ssh:2.0.0-SNAPSHOT",
+				choose("parley-ssh:2.0.0-SNAPSHOT", "", new StringBuilder()).toString());
+	}
+
+	@Test
+	void inBothGroupsBothAreListed() throws Exception {
+		metadata("us.bringardner", "x", "1.0.0");
+		metadata("us.bringardner.parley", "x", "1.0.0", "1.2.0");
+		StringBuilder shown = new StringBuilder();
+		assertEquals("us.bringardner.parley:x:1.2.0", choose("x", "", shown).toString());
+		String s = shown.toString();
+		// (the same version: us.bringardner first)
+		assertTrue(s.indexOf("us.bringardner:x:1.0.0") < s.indexOf("us.bringardner.parley:x:1.0.0"), s);
+		assertEquals("us.bringardner:x:1.0.0", choose("x:1.0.0", "\n", new StringBuilder()).toString());
+	}
+
+	@Test
+	void notFound() {
+		LaunchException e = assertThrows(LaunchException.class, () -> choose("nothing", "", new StringBuilder()));
+		assertTrue(e.getMessage().contains("us.bringardner or us.bringardner.parley"), e.getMessage());
+		e = assertThrows(LaunchException.class, () -> choose("fsh:9.9.9-SNAPSHOT", "", new StringBuilder()));
+		assertTrue(e.getMessage().contains("mvn install"), e.getMessage());
+	}
+
+	@Test
+	void offlineOnlyThisMachinesVersions() throws Exception {
+		where = locations(true);
+		metadata("us.bringardner", "fsh", "1.0.0");
+		put(where.userRepository, Coordinates.parse("us.bringardner:fsh:2.0.0-SNAPSHOT"), jar("x", "y"));
+		assertEquals("us.bringardner:fsh:2.0.0-SNAPSHOT", choose("fsh", "", new StringBuilder()).toString());
+		assertTrue(asked.isEmpty(), asked.toString());
+	}
+
+	@Test
+	void centralUnreachableListsWhatIsHere() throws Exception {
+		put(where.userRepository, Coordinates.parse("us.bringardner:fsh:2.0.0-SNAPSHOT"), jar("x", "y"));
+		server.stop(0);
+		assertEquals("us.bringardner:fsh:2.0.0-SNAPSHOT", choose("fsh", "", new StringBuilder()).toString());
+		assertTrue(notes.stream().anyMatch(n -> n.contains("can't be reached")), notes.toString());
+	}
 }

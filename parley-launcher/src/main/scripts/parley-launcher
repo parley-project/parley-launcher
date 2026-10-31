@@ -7,9 +7,13 @@
 # files it was made from haven't changed, and runs it: no other JVM, no network.
 #
 # Run under its own name it manages the programs:
-#   parley-launcher add NAME GROUP:ARTIFACT:VERSION [MAIN]
+#   parley-launcher add NAME [GROUP:]ARTIFACT[:VERSION] [MAIN]
 #                                                      add a program (its app file and its command);
+#                                                      no GROUP: us.bringardner, else us.bringardner.parley;
+#                                                      no VERSION: pick from the versions found (the
+#                                                      newest release is the default);
 #                                                      MAIN: another main class in that jar
+#   parley-launcher versions [GROUP:]ARTIFACT          the versions found, newest first
 #   parley-launcher remove NAME                        remove one
 #   parley-launcher list                               the programs and their artifacts
 #   parley-launcher command NAME                       the command NAME runs (made if need be)
@@ -232,15 +236,15 @@ if [ "$app" = parley-launcher ]; then
 			echo "$n	$(sed -n 's/^artifact=//p' "$f")"
 		done
 		exit 0 ;;
+	versions)
+		[ $# -eq 2 ] || { echo "usage: parley-launcher versions [GROUP:]ARTIFACT[:VERSION]" >&2; exit 2; }
+		find_java
+		exec "$java" -jar "$jar" versions "$2" ;;
 	add)
-		[ $# -eq 3 ] || [ $# -eq 4 ] || { echo "usage: parley-launcher add NAME GROUP:ARTIFACT:VERSION [MAIN]" >&2; exit 2; }
+		[ $# -eq 3 ] || [ $# -eq 4 ] || { echo "usage: parley-launcher add NAME [GROUP:]ARTIFACT[:VERSION] [MAIN]" >&2; exit 2; }
 		app=$2
 		case $app in
 		*/* | parley-launcher | '' | .*) die "not a program name" ;;
-		esac
-		case $3 in
-		*:*:*) ;;
-		*) die "$3 is not group:artifact:version" ;;
 		esac
 		# (never over a command that isn't one of the launcher's programs)
 		for l in "$prefix/bin/$app" ${bin:+"$bin/$app"}; do
@@ -251,16 +255,25 @@ if [ "$app" = parley-launcher ]; then
 				esac
 			fi
 		done
+		coords=$3
+		case $coords in
+		*:*:*) ;;
+		*)
+			# (no group or no version: the launcher finds them, asking which version when there is a choice)
+			find_java
+			coords=$("$java" -jar "$jar" choose "$coords") || exit $?
+			[ -n "$coords" ] || exit 1 ;;
+		esac
 		mkdir -p "$prefix/apps" || exit 1
 		{
-			printf '# %s: the program the command %s runs\nartifact=%s\n' "$app" "$app" "$3"
+			printf '# %s: the program the command %s runs\nartifact=%s\n' "$app" "$app" "$coords"
 			[ -z "$4" ] || printf 'main=%s\n' "$4"
 		} > "$prefix/apps/$app.properties" || exit 1
 		ln -sf parley-launcher "$prefix/bin/$app" || exit 1
 		if [ -n "$bin" ]; then
 			mkdir -p "$bin" && ln -sf "$prefix/bin/$app" "$bin/$app" || exit 1
 		fi
-		echo "added $app ($3)${bin:+: $bin/$app}"
+		echo "added $app ($coords)${bin:+: $bin/$app}"
 		if [ "$(id -u)" -eq 0 ]; then
 			# (as root, for everyone: each user's command is made at their first start, in their own
 			# repository and cache; made here, root would own files in a home sudo kept)

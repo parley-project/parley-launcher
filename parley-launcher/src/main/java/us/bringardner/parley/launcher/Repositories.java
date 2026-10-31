@@ -95,6 +95,63 @@ public final class Repositories {
 		}
 	}
 
+	private static final java.util.regex.Pattern VERSION = java.util.regex.Pattern.compile("<version>\\s*([^<\\s]+)\\s*</version>");
+
+	/**
+	 * The versions of group:artifact that Maven Central lists (its maven-metadata.xml); empty when it
+	 * has none, or when offline
+	 *
+	 * @throws LaunchException when Central can't be reached
+	 */
+	public List<String> centralVersions(String group, String artifact) throws LaunchException {
+		List<String> ret = new ArrayList<>();
+		if( where.offline ) {
+			return ret;
+		}
+		String url = where.central + group.replace('.', '/') + "/" + artifact + "/maven-metadata.xml";
+		try {
+			// (tried only twice: a list to pick from, not a download; this machine's versions are listed either way)
+			HttpResponse<String> r = send(url, HttpResponse.BodyHandlers.ofString(), METADATA_ATTEMPTS);
+			if( r.statusCode() == 404 ) {
+				return ret;
+			}
+			if( r.statusCode() != 200 ) {
+				throw new LaunchException(url + ": HTTP " + r.statusCode()).temporary();
+			}
+			String xml = r.body().replaceAll("(?s)<!--.*?-->", "");
+			int at = xml.indexOf("<versions>");
+			java.util.regex.Matcher m = VERSION.matcher(at < 0 ? "" : xml.substring(at));
+			while (m.find()) {
+				if( !ret.contains(m.group(1)) ) {
+					ret.add(m.group(1));
+				}
+			}
+			return ret;
+		} catch (IOException e) {
+			throw new LaunchException(url + ": " + e, e).temporary();
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			throw new LaunchException(url + " was interrupted", e).temporary();
+		}
+	}
+
+	/** The versions of group:artifact whose jar is in the machine or the user repository */
+	public Set<String> localVersions(String group, String artifact) {
+		Set<String> ret = new LinkedHashSet<>();
+		for(File repo : new File[] { where.machineRepository, where.userRepository }) {
+			File[] dirs = new File(repo, group.replace('.', '/') + "/" + artifact).listFiles(File::isDirectory);
+			if( dirs == null ) {
+				continue;
+			}
+			for(File d : dirs) {
+				if( new File(d, artifact + "-" + d.getName() + ".jar").isFile() ) {
+					ret.add(d.getName());
+				}
+			}
+		}
+		return ret;
+	}
+
 	/** "!" + c's path in each of the first n repositories of order: c coming to be there changes things */
 	private static void absentBefore(File[] order, int n, Coordinates c, List<String> checks) {
 		for(int i = 0; i < n; i++) {
@@ -273,6 +330,9 @@ public final class Repositories {
 	/** How many times a download is tried when the server is busy (429, 5xx) or the connection fails */
 	static final int ATTEMPTS = 6;
 
+	/** How many times Maven Central's list of an artifact's versions is tried */
+	static final int METADATA_ATTEMPTS = 2;
+
 	private int get(String url, Path to) throws IOException, InterruptedException, LaunchException {
 		return send(url, HttpResponse.BodyHandlers.ofFile(to)).statusCode();
 	}
@@ -288,12 +348,18 @@ public final class Repositories {
 	/** GET, again after a pause (Retry-After, else 1, 2, 4, 8, 16 s) while the server is busy or unreachable */
 	private <T> HttpResponse<T> send(String url, HttpResponse.BodyHandler<T> body)
 			throws IOException, InterruptedException, LaunchException {
+		return send(url, body, ATTEMPTS);
+	}
+
+	/** As send(url, body), trying at most attempts times */
+	private <T> HttpResponse<T> send(String url, HttpResponse.BodyHandler<T> body, int attempts)
+			throws IOException, InterruptedException, LaunchException {
 		for(int attempt = 1;; attempt++) {
 			HttpResponse<T> r;
 			try {
 				r = client().send(request(url), body);
 			} catch (IOException e) {
-				if( attempt >= ATTEMPTS ) {
+				if( attempt >= attempts ) {
 					throw e;
 				}
 				Thread.sleep(1000L << (attempt - 1));
@@ -301,7 +367,7 @@ public final class Repositories {
 			}
 			int st = r.statusCode();
 			boolean busy = st == 429 || (st >= 500 && st <= 504);
-			if( !busy || attempt >= ATTEMPTS ) {
+			if( !busy || attempt >= attempts ) {
 				return r;
 			}
 			long wait = 1000L << (attempt - 1);
