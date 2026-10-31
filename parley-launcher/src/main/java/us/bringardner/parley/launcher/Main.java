@@ -21,6 +21,14 @@ import java.util.List;
  * choice of Java, so a different one makes the command again) then one word of the command a line,
  * and BASE.check, the files that make it out of date when they change (a "!" before a path: when
  * it comes to exist). Exits 1, with the reason on standard error, when the program can't be run.
+ *
+ * <pre>
+ * java -jar parley-launcher.jar choose [GROUP:]ARTIFACT[:VERSION]
+ * java -jar parley-launcher.jar versions [GROUP:]ARTIFACT[:VERSION]
+ * </pre>
+ *
+ * choose prints the full coordinates what was typed means (see Chooser), asking which version on
+ * standard error when there is more than one; versions lists them all, newest first.
  */
 public final class Main {
 
@@ -35,8 +43,40 @@ public final class Main {
 			System.out.println("parley-launcher " + (p.getImplementationVersion() == null ? "(development)" : p.getImplementationVersion()));
 			return 0;
 		}
+		if( "choose".equals(cmd) || "versions".equals(cmd) ) {
+			if( args.length != 2 ) {
+				System.err.println("usage: parley-launcher " + cmd + " [GROUP:]ARTIFACT[:VERSION]");
+				return 2;
+			}
+			Chooser chooser = new Chooser(new Repositories(Locations.fromEnvironment(), w -> System.err.println("parley-launcher: note: " + w)),
+					w -> System.err.println("parley-launcher: note: " + w));
+			try {
+				if( "versions".equals(cmd) ) {
+					List<Chooser.Found> found = chooser.versions(args[1]);
+					int def = Chooser.defaultIndex(found);
+					for(int i = 0; i < found.size(); i++) {
+						System.out.println(found.get(i) + (i == def ? "  [default]" : ""));
+					}
+					if( found.isEmpty() ) {
+						System.err.println("parley-launcher: no version of " + args[1] + " was found");
+						return 1;
+					}
+				} else {
+					// (the prompt on standard error, so the script can take the answer from standard output)
+					System.out.println(chooser.choose(args[1],
+							new java.io.BufferedReader(new java.io.InputStreamReader(System.in, java.nio.charset.Charset.defaultCharset())),
+							System.err));
+				}
+				return 0;
+			} catch (LaunchException e) {
+				System.err.println("parley-launcher: " + e.getMessage());
+				return 1;
+			}
+		}
 		if( !"resolve".equals(cmd) ) {
 			System.err.println("usage: parley-launcher resolve --app NAME --app-file FILE --java JAVA --cache BASE [--key KEY]");
+			System.err.println("       parley-launcher choose [GROUP:]ARTIFACT[:VERSION]");
+			System.err.println("       parley-launcher versions [GROUP:]ARTIFACT[:VERSION]");
 			return "--help".equals(cmd) ? 0 : 2;
 		}
 		String app = null, appFile = null, java = null, cache = null, key = "";
