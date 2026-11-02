@@ -123,7 +123,7 @@ if not exist "%prefix%\bin\parley-launcher.cmd" (
 	exit /b 0
 )
 for %%f in ("%bin%\*.cmd") do (
-	findstr /l /c:"%prefix%\bin\parley-launcher.cmd" "%%f" >nul 2>&1
+	call :ours "%%f"
 	if not errorlevel 1 del /q "%%f"
 )
 rmdir /s /q "%prefix%\bin" "%prefix%\lib" "%prefix%\apps" 2>nul
@@ -135,3 +135,14 @@ exit /b 0
 :not_here
 echo %~nx0: run this from the unpacked parley-launcher folder 1>&2
 exit /b 1
+
+rem exit code 0 when the file %1 is a command parley-launcher made: its first line runs this
+rem installation's parley-launcher.cmd. (findstr can't look for the path: it takes the "\." in
+rem "...\.parley\launcher" for an escape, even with /l)
+:ours
+setlocal EnableDelayedExpansion
+set "first="
+for /f "usebackq delims=" %%l in ("%~1") do if not defined first set "first=%%l"
+if not defined first exit /b 1
+if "!first:%prefix%\bin\parley-launcher.cmd=!"=="!first!" exit /b 1
+exit /b 0
