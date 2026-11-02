@@ -198,7 +198,7 @@ public final class Resolver {
 				}
 			}
 		}
-		if( useWrapper && !new File(wrapper.get(0)).canExecute() ) {
+		if( useWrapper && !canRun(new File(wrapper.get(0)), Locations.platform().startsWith("windows-")) ) {
 			useWrapper = false;
 		}
 		if( useWrapper ) {
@@ -236,6 +236,22 @@ public final class Resolver {
 		ret.command.add(String.join(File.pathSeparator, ret.classPath));
 		ret.command.add(mainClass);
 		return ret;
+	}
+
+	/**
+	 * Whether a wrapper can be run: it is executable and, on Windows (where every file is "executable"),
+	 * a program: an .exe, .com, .bat or .cmd. A file such as fshexec, which has no Windows version, is not
+	 * run there even if a native jar has it.
+	 */
+	static boolean canRun(File f, boolean windows) {
+		if( !f.canExecute() ) {
+			return false;
+		}
+		if( !windows ) {
+			return true;
+		}
+		String n = f.getName().toLowerCase();
+		return n.endsWith(".exe") || n.endsWith(".com") || n.endsWith(".bat") || n.endsWith(".cmd");
 	}
 
 	/**
