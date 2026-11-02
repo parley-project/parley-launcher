@@ -12,6 +12,15 @@ parley-launcher add fsh            # pick the version; the newest release is the
 fsh
 ```
 
+On Windows, from the `.zip` (in a Command Prompt; `--user` installs for you alone, without it needs an
+administrator's prompt):
+
+```bat
+tar -xf parley-launcher-2.0.0.zip && parley-launcher-2.0.0\install.cmd --user
+parley-launcher add fsh
+fsh
+```
+
 ## How it works
 
 1. **Each program's jar says what it needs.** `parley-launcher-maven-plugin` writes
@@ -83,6 +92,24 @@ The artifact, the group and the version can be left out of `add`:
 `/usr/local/bin` (sudo asks), or with `--user` in `~/.parley/launcher`, linked from
 `~/.local/bin`. Running a newer one's `install.sh` upgrades it; `--uninstall` removes it and the
 programs' links (the jars stay in the repositories, which are Maven's too).
+
+On Windows `install.cmd` installs the launcher in `%ProgramData%\Parley\launcher` with its commands in
+`%ProgramData%\Parley\bin` (an administrator's prompt), or with `--user` in `%USERPROFILE%\.parley\launcher`
+and `%USERPROFILE%\.local\bin`; it doesn't change the `PATH`, and says if that folder isn't on it. Each
+program is a small `NAME.cmd` there (`fsh.cmd`) that runs `parley-launcher.cmd` for it. The script does
+what the shell script does, with these differences:
+
+1. **The saved command is checked against what `NAME.sig` holds**: each file in `NAME.check` with its
+   time (to the minute: cmd can't compare times to the second) and size when the command was made, so
+   a file replaced within the same minute by one of the same size isn't noticed. `PARLEY_REFRESH=1`
+   makes the command again.
+2. **`until SECONDS`** (a downloaded SNAPSHOT, looked for again a day later) is taken as "the command was
+   made on an earlier day".
+3. **The command has to fit in a command line** (about 7500 characters; fsh's is 3000), and no path in it
+   may contain `!`.
+4. A wrapper (`<wrapper>`) is run on Windows only when it is an `.exe`, `.com`, `.bat` or `.cmd`: fsh's
+   `fshexec` has no Windows version, so fsh runs without it.
+5. `cmd` may ask "Terminate batch job (Y/N)?" after Ctrl-C ends a program that doesn't handle it itself.
 
 ## The Parley programs
 
@@ -176,13 +203,12 @@ for where the program runs (`linux`, `mac-aarch64`, `win` ...), checked against 
 1. Filling the machine repository (`parley-launcher fetch APP --machine`), which is also how a
    machine without internet access is filled.
 2. Checking Maven Central's GPG signatures.
-3. A Windows launcher (`parley-launcher.cmd`). The Java part already runs there.
 
 ## Layout
 
 - `parley-launcher`: the launcher (no dependencies). `Main` is what the script runs when a
   command must be made. `Resolver` works it out, `Repositories` finds and downloads the jars, and
-  `LaunchList` is the list's format. `src/main/scripts` holds the script and `install.sh`, and
+  `LaunchList` is the list's format. `src/main/scripts` holds the scripts (`parley-launcher` and `install.sh`; `parley-launcher.cmd` and `install.cmd` for Windows), and
   `target/parley-launcher-VERSION.tar.gz` is what a user unpacks.
 - `parley-launcher-maven-plugin`: the `list` goal.
 

@@ -298,8 +298,11 @@ class LauncherTest {
 		Resolver.Launch l = new Resolver(where, notes::add).resolve("app", appFile, "/j/bin/java");
 		File nd = new File(where.launcherHome, "native/org/x/app/1.0/" + platform);
 		List<String> want = new ArrayList<>();
-		want.add(new File(nd, "exec").getAbsolutePath());
-		want.add("-j");
+		// (on Windows a wrapper that is no .exe, .com, .bat or .cmd is left out)
+		if( !platform.startsWith("windows-") ) {
+			want.add(new File(nd, "exec").getAbsolutePath());
+			want.add("-j");
+		}
 		want.add("/j/bin/java");
 		want.add("-Xss16m");
 		want.add("-Djava.library.path=" + nd.getAbsolutePath());
@@ -313,6 +316,20 @@ class LauncherTest {
 		assertTrue(new File(nd, "exec").canExecute());
 		// (the plugin settings files that aren't there are checked for, so adding one remakes the command)
 		assertTrue(l.checks.contains("!" + where.pluginSettings("app")[3].getAbsolutePath()), l.checks.toString());
+	}
+
+	@Test
+	void aWrapperWithoutAWindowsProgramNameIsNotRunOnWindows() throws Exception {
+		File plain = tmp.resolve("fshexec").toFile();
+		Files.write(plain.toPath(), "x".getBytes(StandardCharsets.UTF_8));
+		assertTrue(plain.setExecutable(true));
+		File exe = tmp.resolve("wrap.EXE").toFile();
+		Files.write(exe.toPath(), "x".getBytes(StandardCharsets.UTF_8));
+		assertTrue(exe.setExecutable(true));
+		assertTrue(Resolver.canRun(plain, false));
+		assertFalse(Resolver.canRun(plain, true));
+		assertTrue(Resolver.canRun(exe, true));
+		assertFalse(Resolver.canRun(tmp.resolve("missing.exe").toFile(), true));
 	}
 
 	@Test
