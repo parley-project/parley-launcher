@@ -198,7 +198,7 @@ if not exist "%PL_prefix%\apps\%PL_app%.properties" (
 )
 del /q "%PL_prefix%\apps\%PL_app%.properties" "%PL_prefix%\bin\%PL_app%.cmd" 2>nul
 if defined PL_bin if exist "%PL_bin%\%PL_app%.cmd" (
-	findstr /l /c:"%PL_prefix%\bin\parley-launcher.cmd" "%PL_bin%\%PL_app%.cmd" >nul 2>&1
+	call :is_ours "%PL_bin%\%PL_app%.cmd"
 	if not errorlevel 1 del /q "%PL_bin%\%PL_app%.cmd"
 )
 del /q "%PL_home%\cache\%PL_app%.args" "%PL_home%\cache\%PL_app%.check" "%PL_home%\cache\%PL_app%.sig" 2>nul
@@ -414,6 +414,17 @@ if not defined PL_s exit /b 0
 if "%PL_s:~0,1%"==":" set /a PL_colons+=1
 set "PL_s=%PL_s:~1%"
 goto :count_more
+
+rem exit code 0 when the file %1 is a command parley-launcher made: its first line runs this
+rem installation's parley-launcher.cmd. (findstr can't look for the path: it takes the "\." in
+rem "...\.parley\launcher" for an escape, even with /l)
+:is_ours
+setlocal EnableDelayedExpansion
+set "PL_first="
+for /f "usebackq delims=" %%l in ("%~1") do if not defined PL_first set "PL_first=%%l"
+if not defined PL_first exit /b 1
+if "!PL_first:%PL_prefix%\bin\parley-launcher.cmd=!"=="!PL_first!" exit /b 1
+exit /b 0
 
 rem exit code 0 when this is an administrator's (elevated) prompt
 :is_admin
