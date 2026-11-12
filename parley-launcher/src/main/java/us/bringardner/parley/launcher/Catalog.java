@@ -16,8 +16,9 @@ import java.util.List;
  *
  * <pre>
  * # parley-launcher programs 1
- * pssh       | us.bringardner.parley:parley-ssh |                                    | The Parley SSH client
- * fsh-ide-fx | us.bringardner:fsh-ide           | us.bringardner.fsh.ide.fx.FshIdeFx | The fsh script IDE (JavaFX)
+ * pssh   | us.bringardner.parley:parley-ssh |             | The Parley SSH client
+ * fshide | us.bringardner:fsh-ide           |             | fsh IDE: edit, run and debug fsh scripts
+ * other  | org.example:app                  | org.x.Other | Another main class in the same jar
  * </pre>
  */
 public final class Catalog {

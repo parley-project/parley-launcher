@@ -1,7 +1,7 @@
 @echo off
 rem Runs a Parley program on a Java installed on this machine (parley-launcher.cmd is parley-launcher's
 rem Windows script; see the parley-launcher script for Linux and macOS, which this follows).
-rem Each program is a small NAME.cmd that runs this file for it (fsh.cmd, fsh-ide.cmd, pssh.cmd ...);
+rem Each program is a small NAME.cmd that runs this file for it (fsh.cmd, fshide.cmd, pssh.cmd ...);
 rem PREFIX\apps\NAME.properties names the program's artifact (artifact=group:artifact:version).
 rem The jars it needs are found in the machine repository (%ProgramData%\Parley\repository), then in
 rem the user's (%USERPROFILE%\.m2\repository), or downloaded from Maven Central into the user's; the
@@ -77,7 +77,7 @@ exit /b 2
 
 :usage
 echo Runs a Parley program on a Java installed on this machine. Each program is a NAME.cmd that
-echo runs this script for it (fsh, fsh-ide, pssh ...); run as parley-launcher it manages them:
+echo runs this script for it (fsh, fshide, pssh ...); run as parley-launcher it manages them:
 echo.
 echo   parley-launcher add NAME [[GROUP:]ARTIFACT[:VERSION] [MAIN]]
 echo                                    add a program (its app file and its command);

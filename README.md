@@ -2,8 +2,8 @@
 
 Runs a Parley program on a Java that is already installed (11 or later), or on one it downloads
 for itself when there is none. Its command is `parley`
-(`parley-launcher`, the earlier name, still works). Every program (fsh, fsh-ide, pssh,
-parley-files-viewer ...) starts through one script, renamed or linked for it. The
+(`parley-launcher`, the earlier name, still works). Every program (fsh, fshide, pssh,
+pfiles ...) starts through one script, renamed or linked for it. The
 script makes sure every jar the program needs is on the machine, fetching the missing ones from
 Maven Central, then runs it. The programs share their jars the way Maven projects share
 `~/.m2/repository`: one copy of `parley-core-2.0.0.jar`, whatever uses it.
@@ -156,21 +156,19 @@ On Windows the launcher doesn't download a Java yet.
 | Command | Add it with |
 |---|---|
 | `fsh` | `parley add fsh` |
-| `fsh-ide` | `parley add fsh-ide` |
-| `fsh-ide-fx` (JavaFX) | `parley add fsh-ide-fx` |
+| `fshide` (fsh IDE) | `parley add fshide` |
 | `fshdb` | `parley add fshdb` |
 | `pssh` | `parley add pssh` |
-| `parley-files-viewer` | `parley add parley-files-viewer` |
-| `parley-files-viewer-fx` (JavaFX) | `parley add parley-files-viewer-fx` |
+| `pfiles` (Parley Files) | `parley add pfiles` |
 | `pfv` | `parley add pfv` |
 
-On Windows, for now, each needs its artifact (and the JavaFX ones their main class), as in
+On Windows, for now, each needs its artifact, as in
 `parley-launcher add pssh us.bringardner.parley:parley-ssh` and
-`parley-launcher add fsh-ide-fx us.bringardner:fsh-ide us.bringardner.fsh.ide.fx.FshIdeFx`.
+`parley-launcher add fshide us.bringardner:fsh-ide`.
 
 The last argument of `add` names another main class in the same jar (`main=` in the app file).
-fsh-ide and fshdb run fsh scripts, so they use fsh's native jar too. The JavaFX programs get
-JavaFX's jars for the platform they run on.
+fshide and fshdb run fsh scripts, so they use fsh's native jar too. A program that uses JavaFX
+gets JavaFX's jars for the platform it runs on.
 
 ## Plugins
 
