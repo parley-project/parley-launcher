@@ -20,11 +20,18 @@
 #   parley remove NAME               remove one
 #   parley versions [GROUP:]ARTIFACT the versions found, newest first
 #   parley command NAME              the command NAME runs (made if need be)
+#   parley java                      the Java the programs run on
+#   parley java install              download a Java for the launcher's own use (Eclipse Temurin)
+#   parley java update               replace a Java the launcher downloaded with the newest
 #   parley --version
 #
 # Settings (environment variables):
 #   JAVA_HOME                   its java when that is 11 or later, else the newest Java found
 #   PARLEY_JAVA                 the java executable to use
+#   PARLEY_INSTALL_JAVA         when no Java 11 or later is found: yes: download one without asking;
+#                               no: never; otherwise the launcher asks (when there is a terminal to ask on)
+#   PARLEY_JAVA_VERSION         the Java to download (21, 25 ...) instead of the newest long-term one
+#   PARLEY_JAVA_API             instead of https://api.adoptium.net/v3 (where a Java is downloaded from)
 #   PARLEY_REFRESH=1            make the command again (after installing a newer Java, say)
 #   PARLEY_OFFLINE=true         download nothing
 #   PARLEY_MACHINE_REPOSITORY   instead of /usr/local/lib/parley/repository
@@ -151,6 +158,10 @@ $j"
 		fi
 	fi
 	for j in \
+		"$prefix"/java/*/bin/java \
+		"$prefix"/java/*/Contents/Home/bin/java \
+		"$home"/java/*/bin/java \
+		"$home"/java/*/Contents/Home/bin/java \
 		/Library/Java/JavaVirtualMachines/*/Contents/Home/bin/java \
 		"$HOME"/Library/Java/JavaVirtualMachines/*/Contents/Home/bin/java \
 		/usr/lib/jvm/*/bin/java \
@@ -185,11 +196,214 @@ EOF
 		{
 			echo "$app: Java $min or later is needed, and none was found on this computer."
 			[ -n "$older" ] && echo "These are installed but too old:$older"
+		} >&2
+		# (the launcher can download one for its own use, when the person says so)
+		if offer_java; then
+			return
+		fi
+		{
 			echo "Install a JDK $min or later (for example from https://adoptium.net), or set JAVA_HOME"
-			echo "(or PARLEY_JAVA) to one, and run $app again."
+			echo "(or PARLEY_JAVA) to one, and run $app again. Or let the launcher download one for its"
+			echo "own use: parley java install"
 		} >&2
 		exit 1
 	fi
+}
+
+# ---- downloading a Java (Eclipse Temurin, from adoptium.net) for the launcher's own use
+
+# Where a downloaded Java is kept: the installation's folder when root runs this (for everyone),
+# else the user's (~/.parley/launcher/java). It is not put on the PATH; only the launcher uses it.
+java_dir() {
+	if [ "$(id -u)" -eq 0 ]; then
+		echo "$prefix/java"
+	else
+		echo "$home/java"
+	fi
+}
+
+# fetch URL FILE [show]: download URL into FILE (show: with a progress bar, when curl has one)
+fetch() {
+	if command -v curl > /dev/null 2>&1; then
+		if [ -n "$3" ] && [ -t 2 ]; then
+			curl -fL --retry 2 -# -o "$2" "$1"
+		else
+			curl -fsSL --retry 2 -o "$2" "$1"
+		fi
+	elif command -v wget > /dev/null 2>&1; then
+		wget -q -O "$2" "$1"
+	else
+		return 127
+	fi
+}
+
+# a file's SHA-256, in hex
+sha256_of() {
+	if command -v sha256sum > /dev/null 2>&1; then
+		sha256sum "$1" | cut -d' ' -f1
+	elif command -v shasum > /dev/null 2>&1; then
+		shasum -a 256 "$1" | cut -d' ' -f1
+	elif command -v openssl > /dev/null 2>&1; then
+		openssl dgst -sha256 "$1" | sed 's/.*= *//'
+	else
+		return 1
+	fi
+}
+
+# the java executable in a downloaded Java's folder (macOS keeps it under Contents/Home), or nothing
+java_in() {
+	if [ -x "$1/bin/java" ]; then
+		echo "$1/bin/java"
+	elif [ -x "$1/Contents/Home/bin/java" ]; then
+		echo "$1/Contents/Home/bin/java"
+	fi
+}
+
+# Ask whether to download a Java (PARLEY_INSTALL_JAVA=yes: no question; no: never; with no terminal to
+# ask on, it isn't downloaded), and download it. Returns 0 with $java set when one was installed.
+offer_java() {
+	case ${PARLEY_INSTALL_JAVA:-ask} in
+	yes | true | 1) ;;
+	no | false | 0) return 1 ;;
+	*)
+		[ -t 0 ] && [ -t 2 ] || return 1
+		printf '%s' "Download Java now, for the Parley programs only (Eclipse Temurin, about 50 MB, into $(java_dir))? [Y/n] " >&2
+		IFS= read -r answer || return 1
+		case $answer in
+		'' | y | Y | yes | Yes | YES) ;;
+		*) return 1 ;;
+		esac ;;
+	esac
+	install_java
+}
+
+# Download the newest long-term-support Java for this platform into java_dir, checked against the
+# SHA-256 adoptium.net gives for it. Returns 0 with $java set to its java; 1, with the reason said,
+# when it can't be done. One that was downloaded before is used as it is.
+install_java() {
+	case $(uname -s) in
+	Darwin) jos=mac ;;
+	Linux)
+		jos=linux
+		# (Alpine's C library is another one, with its own build)
+		[ -f /etc/alpine-release ] && jos=alpine-linux ;;
+	*)
+		echo "$app: there is no Java to download for $(uname -s)" >&2
+		return 1 ;;
+	esac
+	case $(uname -m) in
+	x86_64 | amd64) jarch=x64 ;;
+	arm64 | aarch64) jarch=aarch64 ;;
+	*)
+		echo "$app: there is no Java to download for $(uname -m)" >&2
+		return 1 ;;
+	esac
+	command -v tar > /dev/null 2>&1 || { echo "$app: downloading Java needs tar" >&2; return 1; }
+	api=${PARLEY_JAVA_API:-https://api.adoptium.net/v3}
+	jdest=$(java_dir)
+	jtmp=$jdest/.download.$$
+	mkdir -p "$jtmp/unpacked" || { echo "$app: can't write to $jdest" >&2; return 1; }
+	trap 'rm -rf "$jtmp"; exit 130' INT TERM
+	jfeature=$PARLEY_JAVA_VERSION
+	if [ -z "$jfeature" ]; then
+		fetch "$api/info/available_releases" "$jtmp/releases.json"
+		case $? in
+		0) ;;
+		127)
+			rm -rf "$jtmp"; trap - INT TERM
+			echo "$app: downloading Java needs curl or wget" >&2
+			return 1 ;;
+		*)
+			rm -rf "$jtmp"; trap - INT TERM
+			echo "$app: can't reach $api to download Java" >&2
+			return 1 ;;
+		esac
+		jfeature=$(sed -n 's/.*"most_recent_lts": *\([0-9][0-9]*\).*/\1/p' "$jtmp/releases.json" | head -n 1)
+	fi
+	case $jfeature in
+	'' | *[!0-9]*)
+		rm -rf "$jtmp"; trap - INT TERM
+		echo "$app: can't tell which Java to download (PARLEY_JAVA_VERSION=21 names one)" >&2
+		return 1 ;;
+	esac
+	if ! fetch "$api/assets/latest/$jfeature/hotspot?architecture=$jarch&image_type=jre&os=$jos&vendor=eclipse" "$jtmp/asset.json"; then
+		rm -rf "$jtmp"; trap - INT TERM
+		echo "$app: can't reach $api to download Java $jfeature" >&2
+		return 1
+	fi
+	# (the archive's entry: "package": { "checksum": ..., "link": ..., "name": ... }; a macOS
+	# release also has an "installer" entry, which is not it)
+	jpkg=$(sed -n '/"package": *{/,/}/p' "$jtmp/asset.json")
+	jlink=$(printf '%s\n' "$jpkg" | sed -n 's/.*"link": *"\([^"]*\)".*/\1/p' | head -n 1)
+	jsum=$(printf '%s\n' "$jpkg" | sed -n 's/.*"checksum": *"\([0-9a-fA-F]*\)".*/\1/p' | head -n 1)
+	case $jlink in
+	https://*.tar.gz) ;;
+	*)
+		rm -rf "$jtmp"; trap - INT TERM
+		echo "$app: adoptium.net has no Java $jfeature for $jos $jarch" >&2
+		return 1 ;;
+	esac
+	if [ -z "$jsum" ]; then
+		rm -rf "$jtmp"; trap - INT TERM
+		echo "$app: adoptium.net gave no checksum for $jlink: it is not downloaded" >&2
+		return 1
+	fi
+	# (downloaded before: its folder says which archive it came from)
+	for m in "$jdest"/*/.parley-java; do
+		if [ -f "$m" ] && [ "$(cat "$m")" = "$jlink" ]; then
+			j=$(java_in "$(dirname "$m")")
+			if [ -n "$j" ]; then
+				rm -rf "$jtmp"; trap - INT TERM
+				java=$j
+				java_was_there=yes
+				return 0
+			fi
+		fi
+	done
+	echo "$app: downloading Java $jfeature from $jlink" >&2
+	if ! fetch "$jlink" "$jtmp/java.tar.gz" show; then
+		rm -rf "$jtmp"; trap - INT TERM
+		echo "$app: the download failed" >&2
+		return 1
+	fi
+	jgot=$(sha256_of "$jtmp/java.tar.gz") || {
+		rm -rf "$jtmp"; trap - INT TERM
+		echo "$app: the download can't be checked (no sha256sum, shasum or openssl here): it is not used" >&2
+		return 1
+	}
+	if [ "$jgot" != "$(printf '%s' "$jsum" | tr 'A-F' 'a-f')" ]; then
+		rm -rf "$jtmp"; trap - INT TERM
+		echo "$app: the Java downloaded does not match its SHA-256 ($jgot, adoptium.net says $jsum): it is not used" >&2
+		return 1
+	fi
+	if ! tar -xzf "$jtmp/java.tar.gz" -C "$jtmp/unpacked"; then
+		rm -rf "$jtmp"; trap - INT TERM
+		echo "$app: can't unpack the Java downloaded" >&2
+		return 1
+	fi
+	jtop=$(ls "$jtmp/unpacked" | head -n 1)
+	j=""
+	[ -n "$jtop" ] && j=$(java_in "$jtmp/unpacked/$jtop")
+	if [ -z "$j" ] || ! java_major "$j" > /dev/null; then
+		rm -rf "$jtmp"; trap - INT TERM
+		echo "$app: what was downloaded is not a Java for this computer" >&2
+		return 1
+	fi
+	printf '%s\n' "$jlink" > "$jtmp/unpacked/$jtop/.parley-java"
+	rm -rf "$jdest/$jtop"
+	if ! mv "$jtmp/unpacked/$jtop" "$jdest/$jtop"; then
+		rm -rf "$jtmp"; trap - INT TERM
+		echo "$app: can't write to $jdest" >&2
+		return 1
+	fi
+	rm -rf "$jtmp"
+	trap - INT TERM
+	# (for everyone, when root put it in the installation's folder)
+	chmod -R a+rX "$jdest" 2> /dev/null
+	java=$(java_in "$jdest/$jtop")
+	java_was_there=""
+	echo "$app: Java $jfeature is in $jdest/$jtop" >&2
+	return 0
 }
 
 # Make NAME's saved command (the launcher works it out, fetching what is missing)
@@ -255,6 +469,44 @@ if [ "$app" = parley ] || [ "$app" = parley-launcher ]; then
 		[ $# -eq 2 ] || { echo "usage: parley versions [GROUP:]ARTIFACT[:VERSION]" >&2; exit 2; }
 		find_java
 		exec "$java" -jar "$jar" versions "$2" ;;
+	java)
+		case ${2:-show} in
+		show)
+			[ $# -le 1 ] || { echo "usage: parley java [install | update]" >&2; exit 2; }
+			find_java
+			echo "$java (Java $(java_major "$java"))"
+			exit 0 ;;
+		install)
+			[ $# -eq 2 ] || { echo "usage: parley java install" >&2; exit 2; }
+			install_java || exit 1
+			[ -z "$java_was_there" ] || echo "the newest Java is here already" >&2
+			echo "$java (Java $(java_major "$java"))"
+			exit 0 ;;
+		update)
+			[ $# -eq 2 ] || { echo "usage: parley java update" >&2; exit 2; }
+			jdest=$(java_dir)
+			had=""
+			for m in "$jdest"/*/.parley-java; do
+				[ -f "$m" ] && had=yes
+			done
+			[ -n "$had" ] || { echo "the launcher has downloaded no Java into $jdest: there is nothing to update (parley java install downloads one)"; exit 0; }
+			install_java || exit 1
+			if [ -n "$java_was_there" ]; then
+				echo "the newest Java is here already: $java"
+				exit 0
+			fi
+			# (the ones downloaded before go; the programs' commands are made again at their next start)
+			for m in "$jdest"/*/.parley-java; do
+				[ -f "$m" ] || continue
+				d=$(dirname "$m")
+				[ "$(java_in "$d")" = "$java" ] || rm -rf "$d"
+			done
+			echo "$java (Java $(java_major "$java"))"
+			exit 0 ;;
+		*)
+			echo "usage: parley java [install | update]" >&2
+			exit 2 ;;
+		esac ;;
 	command)
 		[ $# -eq 2 ] || { echo "usage: parley command NAME" >&2; exit 2; }
 		app=$2
