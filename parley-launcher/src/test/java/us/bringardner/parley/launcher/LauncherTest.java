@@ -319,6 +319,36 @@ class LauncherTest {
 	}
 
 	@Test
+	void aWrapperThatDoesNotStartHereIsLeftOut() throws Exception {
+		org.junit.jupiter.api.Assumptions.assumeFalse(WINDOWS);
+		String platform = Locations.platform();
+		// (as one built for a newer C library: it is there, executable, and fails)
+		publish(Coordinates.parse("org.x:app:jar:" + platform + ":1.0"),
+				jar("exec", "#!/bin/sh\necho \"exec: version GLIBC_2.34 not found\" >&2\nexit 1\n", "libx.so", "x"));
+		File appFile = app(LaunchList.HEADER + "\nmain=org.x.Main\njava=11\noption=-Djava.library.path=${native}\n"
+				+ "native=org.x:app:jar:${platform}:1.0\nnative.optional=true\nwrapper=${native}/exec\nwrapper=-j\n");
+		Resolver.Launch l = new Resolver(where, notes::add).resolve("app", appFile, "/j/bin/java");
+		// (the program still starts, with its native folder, without the wrapper)
+		assertEquals("/j/bin/java", l.command.get(0));
+		assertTrue(l.command.get(1).startsWith("-Djava.library.path="), l.command.toString());
+		assertTrue(notes.toString().contains("running without exec: it doesn't start on this computer (exec: version GLIBC_2.34 not found)"),
+				notes.toString());
+		assertFalse(l.retry);
+	}
+
+	@Test
+	void aWrapperIsTriedAsItWillBeRun() throws Exception {
+		org.junit.jupiter.api.Assumptions.assumeFalse(WINDOWS);
+		File w = tmp.resolve("w.sh").toFile();
+		// (it works only when given -j, a java and -version)
+		Files.write(w.toPath(), "#!/bin/sh\n[ \"$1\" = -j ] && [ \"$2\" = /j/bin/java ] && [ \"$3\" = -version ]\n".getBytes(StandardCharsets.UTF_8));
+		assertTrue(w.setExecutable(true));
+		assertNull(Resolver.wrapperFails(java.util.Arrays.asList(w.getPath(), "-j"), "/j/bin/java"));
+		assertEquals("exit code 1", Resolver.wrapperFails(java.util.Arrays.asList(w.getPath()), "/j/bin/java"));
+		assertNotNull(Resolver.wrapperFails(java.util.Arrays.asList(tmp.resolve("nothere").toString()), "/j/bin/java"));
+	}
+
+	@Test
 	void aWrapperWithoutAWindowsProgramNameIsNotRunOnWindows() throws Exception {
 		File plain = tmp.resolve("fshexec").toFile();
 		Files.write(plain.toPath(), "x".getBytes(StandardCharsets.UTF_8));
