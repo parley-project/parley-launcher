@@ -451,9 +451,27 @@ if [ "$app" = parley ] || [ "$app" = parley-launcher ]; then
 	--version)
 		find_java
 		exec "$java" -jar "$jar" --version ;;
-	add | update)
+	add | update | remove)
+		# (an installation for every user is changed by an administrator: through sudo, as install.sh
+		# does, by this script's full path, since sudo's PATH often has no /usr/local/bin. The versions
+		# this user has installed with mvn install stay in the list to pick from; as root nothing is
+		# written there)
+		d=$prefix/apps
+		[ -d "$d" ] || d=$prefix
+		if [ "$(id -u)" -ne 0 ] && [ ! -w "$d" ] && [ -z "$PARLEY_SUDO" ] && command -v sudo > /dev/null 2>&1; then
+			echo "parley: the launcher in $prefix is every user's, so this needs administrator rights: sudo may ask for your password." >&2
+			set -- "$prefix/bin/parley" "$@"
+			for v in PARLEY_OFFLINE PARLEY_CENTRAL PARLEY_SNAPSHOTS PARLEY_MACHINE_REPOSITORY PARLEY_JAVA JAVA_HOME; do
+				eval "x=\${$v}"
+				[ -z "$x" ] || set -- "$v=$x" "$@"
+			done
+			exec sudo env PARLEY_SUDO=1 "PARLEY_USER_REPOSITORY=${PARLEY_USER_REPOSITORY:-$HOME/.m2/repository}" "$@"
+		fi
 		[ -f "$jar" ] || die "$jar is missing: keep the folder parley was installed in together"
 		find_java
+		if [ "$1" = remove ]; then
+			exec "$java" -jar "$jar" --prefix "$prefix" --bin "$bin" --home "$home" "$@"
+		fi
 		if [ "$(id -u)" -eq 0 ]; then
 			# (as root, for everyone: each user's command is made at their first start, in their own
 			# repository and cache; made here, root would own files in a home sudo kept)
@@ -461,7 +479,7 @@ if [ "$app" = parley ] || [ "$app" = parley-launcher ]; then
 		fi
 		# (the command is made now, so a missing jar or SNAPSHOT shows here, not at the first start)
 		exec "$java" -jar "$jar" --prefix "$prefix" --bin "$bin" --home "$home" --java "$java" --key "$key" "$@" ;;
-	list | remove | available)
+	list | available)
 		[ -f "$jar" ] || die "$jar is missing: keep the folder parley was installed in together"
 		find_java
 		exec "$java" -jar "$jar" --prefix "$prefix" --bin "$bin" --home "$home" "$@" ;;
