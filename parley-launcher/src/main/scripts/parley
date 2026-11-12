@@ -243,14 +243,14 @@ if [ "$app" = parley ] || [ "$app" = parley-launcher ]; then
 		if [ "$(id -u)" -eq 0 ]; then
 			# (as root, for everyone: each user's command is made at their first start, in their own
 			# repository and cache; made here, root would own files in a home sudo kept)
-			exec "$java" -jar "$jar" --prefix "$prefix" --bin "$bin" "$@"
+			exec "$java" -jar "$jar" --prefix "$prefix" --bin "$bin" --home "$home" "$@"
 		fi
 		# (the command is made now, so a missing jar or SNAPSHOT shows here, not at the first start)
-		exec "$java" -jar "$jar" --prefix "$prefix" --bin "$bin" --java "$java" --key "$key" "$@" ;;
+		exec "$java" -jar "$jar" --prefix "$prefix" --bin "$bin" --home "$home" --java "$java" --key "$key" "$@" ;;
 	list | remove | available)
 		[ -f "$jar" ] || die "$jar is missing: keep the folder parley was installed in together"
 		find_java
-		exec "$java" -jar "$jar" --prefix "$prefix" --bin "$bin" "$@" ;;
+		exec "$java" -jar "$jar" --prefix "$prefix" --bin "$bin" --home "$home" "$@" ;;
 	versions)
 		[ $# -eq 2 ] || { echo "usage: parley versions [GROUP:]ARTIFACT[:VERSION]" >&2; exit 2; }
 		find_java

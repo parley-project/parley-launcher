@@ -771,7 +771,7 @@ class LauncherTest {
 
 	/** the commands, with this typed as the answer to any question; make: commands are made as programs are added */
 	ProgramCommands commands(String answer, boolean make) {
-		ProgramCommands c = new ProgramCommands(registry(), where, Catalog.builtIn(),
+		ProgramCommands c = new ProgramCommands(registry(), where, Catalog.builtIn(), null,
 				new java.io.BufferedReader(new java.io.StringReader(answer)), new java.io.PrintStream(printed, true),
 				new java.io.PrintStream(errors, true));
 		if( make ) {
