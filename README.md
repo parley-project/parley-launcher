@@ -84,6 +84,10 @@ fsh
 | `parley java install` | Download a Java for the launcher's own use (see below) |
 | `parley java update` | Replace a Java the launcher downloaded with the newest |
 
+When the launcher is installed for every user (`/usr/local/lib/parley/launcher`), `add`, `update`
+and `remove` need administrator rights: run by anyone else, `parley` runs itself again through
+`sudo` (which may ask for your password), saying so first.
+
 What `add` works out for itself:
 
 1. **A name the launcher knows** (`parley add pssh`): its group, artifact and, where it has one,
