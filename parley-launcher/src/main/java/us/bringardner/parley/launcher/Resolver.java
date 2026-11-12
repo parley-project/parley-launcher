@@ -101,7 +101,7 @@ public final class Resolver {
 			throw new LaunchException(main + " (" + mainJar + ") has no " + LaunchList.RESOURCE
 					+ ": it was not built with parley-launcher-maven-plugin");
 		}
-		// (the app file may name another main class in the same jar: fsh-ide-fx beside fsh-ide)
+		// (the app file may name another main class in the same jar)
 		String mainClass = desc.getProperty("main", "").trim();
 		if( mainClass.isEmpty() ) {
 			mainClass = list.mainClass;

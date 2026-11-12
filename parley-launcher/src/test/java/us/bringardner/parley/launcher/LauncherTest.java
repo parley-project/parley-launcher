@@ -771,7 +771,11 @@ class LauncherTest {
 
 	/** the commands, with this typed as the answer to any question; make: commands are made as programs are added */
 	ProgramCommands commands(String answer, boolean make) {
-		ProgramCommands c = new ProgramCommands(registry(), where, Catalog.builtIn(), null,
+		return commands(answer, make, Catalog.builtIn());
+	}
+
+	ProgramCommands commands(String answer, boolean make, Catalog catalog) {
+		ProgramCommands c = new ProgramCommands(registry(), where, catalog, null,
 				new java.io.BufferedReader(new java.io.StringReader(answer)), new java.io.PrintStream(printed, true),
 				new java.io.PrintStream(errors, true));
 		if( make ) {
@@ -806,10 +810,24 @@ class LauncherTest {
 		Catalog c = Catalog.builtIn();
 		assertEquals("us.bringardner.parley:parley-ssh", c.find("pssh").artifact());
 		assertNull(c.find("pssh").mainClass);
-		assertEquals("us.bringardner:fsh-ide", c.find("fsh-ide-fx").artifact());
-		assertEquals("us.bringardner.fsh.ide.fx.FshIdeFx", c.find("fsh-ide-fx").mainClass);
+		assertEquals("us.bringardner:fsh-ide", c.find("fshide").artifact());
+		assertEquals("us.bringardner.parley:parley-files-viewer", c.find("pfiles").artifact());
+		// (the names before fsh IDE and Parley Files, and the JavaFX programs, are gone)
+		for(String gone : new String[] { "fsh-ide", "fsh-ide-fx", "parley-files-viewer", "parley-files-viewer-fx" }) {
+			assertNull(c.find(gone), gone);
+		}
 		assertNull(c.find("no-such-program"));
 		assertFalse(c.find("fsh").description.isEmpty());
+	}
+
+	@Test
+	void aCatalogEntryCanNameItsMainClass() throws IOException {
+		Catalog c = Catalog.read(new ByteArrayInputStream(
+				"# programs\nother | org.x:app | org.x.Other | Another main class in app's jar\nplain | org.x:app\n".getBytes(StandardCharsets.UTF_8)));
+		assertEquals("org.x.Other", c.find("other").mainClass);
+		assertEquals("Another main class in app's jar", c.find("other").description);
+		assertNull(c.find("plain").mainClass);
+		assertEquals("", c.find("plain").description);
 	}
 
 	@Test
@@ -823,11 +841,11 @@ class LauncherTest {
 		assertTrue(r.list().isEmpty());
 		assertNull(r.find("fsh"));
 		r.add(new Program("fsh", Coordinates.parse("us.bringardner:fsh:2.0.0"), null));
-		r.add(new Program("fsh-ide-fx", Coordinates.parse("us.bringardner:fsh-ide:2.0.0"), "x.Fx"));
+		r.add(new Program("other", Coordinates.parse("us.bringardner:fsh-ide:2.0.0"), "x.Fx"));
 		assertEquals("# fsh: the program the command fsh runs\nartifact=us.bringardner:fsh:2.0.0\n",
 				new String(Files.readAllBytes(r.appFile("fsh").toPath()), StandardCharsets.UTF_8));
-		assertEquals("[fsh (us.bringardner:fsh:2.0.0), fsh-ide-fx (us.bringardner:fsh-ide:2.0.0)]", r.list().toString());
-		assertEquals("x.Fx", r.find("fsh-ide-fx").mainClass);
+		assertEquals("[fsh (us.bringardner:fsh:2.0.0), other (us.bringardner:fsh-ide:2.0.0)]", r.list().toString());
+		assertEquals("x.Fx", r.find("other").mainClass);
 		File inner = r.commands("fsh").get(0);
 		File outer = r.commands("fsh").get(1);
 		if( WINDOWS ) {
@@ -913,16 +931,18 @@ class LauncherTest {
 
 	@Test
 	void addTakesTheCatalogsMainClassForItsArtifactOnly() throws Exception {
-		program("us.bringardner", "fsh-ide", "2.0.0");
+		Catalog catalog = Catalog.read(new ByteArrayInputStream(
+				"other | org.x:app | org.x.Other | Another main class\n".getBytes(StandardCharsets.UTF_8)));
+		program("org.x", "app", "2.0.0");
 		program("org.other", "thing", "1.0");
-		assertEquals(0, commands("", false).add(args("fsh-ide-fx")), errors());
-		assertEquals("us.bringardner.fsh.ide.fx.FshIdeFx", registry().find("fsh-ide-fx").mainClass);
+		assertEquals(0, commands("", false, catalog).add(args("other")), errors());
+		assertEquals("org.x.Other", registry().find("other").mainClass);
 		// (the name given another artifact: not the catalog's main class)
-		assertEquals(0, commands("", false).add(args("fsh-ide-fx", "org.other:thing:1.0")), errors());
-		assertNull(registry().find("fsh-ide-fx").mainClass);
+		assertEquals(0, commands("", false, catalog).add(args("other", "org.other:thing:1.0")), errors());
+		assertNull(registry().find("other").mainClass);
 		// (a main class typed is the one)
-		assertEquals(0, commands("", false).add(args("fsh-ide-fx", "us.bringardner:fsh-ide:2.0.0", "my.Main")), errors());
-		assertEquals("my.Main", registry().find("fsh-ide-fx").mainClass);
+		assertEquals(0, commands("", false, catalog).add(args("other", "org.x:app:2.0.0", "my.Main")), errors());
+		assertEquals("my.Main", registry().find("other").mainClass);
 	}
 
 	@Test
@@ -987,11 +1007,11 @@ class LauncherTest {
 	void updateKeepsTheMainClassAndMovesASnapshotToTheNewestOfAll() throws Exception {
 		ProgramRegistry r = registry();
 		put(where.userRepository, Coordinates.parse("us.bringardner:fsh-ide:2.0.0-SNAPSHOT"), jar("x", "y"));
-		r.add(new Program("fsh-ide-fx", Coordinates.parse("us.bringardner:fsh-ide:2.0.0-SNAPSHOT"), "x.Fx"));
+		r.add(new Program("other", Coordinates.parse("us.bringardner:fsh-ide:2.0.0-SNAPSHOT"), "x.Fx"));
 		program("us.bringardner", "fsh-ide", "2.0.0");
 		assertEquals(0, commands("", false).update(args()), errors());
-		assertEquals("us.bringardner:fsh-ide:2.0.0", r.find("fsh-ide-fx").coordinates.toString());
-		assertEquals("x.Fx", r.find("fsh-ide-fx").mainClass);
+		assertEquals("us.bringardner:fsh-ide:2.0.0", r.find("other").coordinates.toString());
+		assertEquals("x.Fx", r.find("other").mainClass);
 	}
 
 	@Test

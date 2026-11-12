@@ -1,6 +1,6 @@
 #!/bin/sh
 # Runs a Parley program on a Java installed on this machine. Each program is a link to this file,
-# named for it (fsh, fsh-ide, pssh ...); PREFIX/apps/NAME.properties names the program's artifact
+# named for it (fsh, fshide, pssh ...); PREFIX/apps/NAME.properties names the program's artifact
 # (artifact=group:artifact:version). The jars it needs are found in the machine repository, then in
 # the user's (~/.m2/repository), or downloaded from Maven Central into the user's; the command that
 # runs it is saved (~/.parley/launcher/cache/NAME.args), so the next start only checks that the
