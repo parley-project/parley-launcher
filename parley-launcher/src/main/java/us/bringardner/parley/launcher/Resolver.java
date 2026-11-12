@@ -207,6 +207,15 @@ public final class Resolver {
 			useWrapper = false;
 		}
 		if( useWrapper ) {
+			// (it is there and executable, but was it built for this machine? One built for a newer C
+			// library doesn't start, and nothing it wraps would start either)
+			String why = wrapperFails(wrapper, java);
+			if( why != null ) {
+				warn.accept("running without " + new File(wrapper.get(0)).getName() + ": it doesn't start on this computer (" + why + ")");
+				useWrapper = false;
+			}
+		}
+		if( useWrapper ) {
 			ret.command.addAll(wrapper);
 		}
 		ret.command.add(java);
@@ -257,6 +266,46 @@ public final class Resolver {
 		}
 		String n = f.getName().toLowerCase();
 		return n.endsWith(".exe") || n.endsWith(".com") || n.endsWith(".bat") || n.endsWith(".cmd");
+	}
+
+	/**
+	 * Try a wrapper before it is made part of a program's command: run it as the program will be run,
+	 * with the java it is to start asked only for its version.
+	 *
+	 * @return null when that worked, else why not (the first line it printed, or its exit code)
+	 */
+	static String wrapperFails(List<String> wrapper, String javaPath) {
+		List<String> cmd = new ArrayList<>(wrapper);
+		cmd.add(javaPath);
+		cmd.add("-version");
+		File out = null;
+		try {
+			out = File.createTempFile("parley-wrapper", ".out");
+			Process p = new ProcessBuilder(cmd).redirectErrorStream(true).redirectOutput(out)
+					.redirectInput(ProcessBuilder.Redirect.from(out)).start();
+			try {
+				if( !p.waitFor(30, java.util.concurrent.TimeUnit.SECONDS) ) {
+					return "no answer in 30 seconds";
+				}
+				if( p.exitValue() == 0 ) {
+					return null;
+				}
+				List<String> lines = Files.readAllLines(out.toPath(), java.nio.charset.Charset.defaultCharset());
+				String first = lines.isEmpty() ? "" : lines.get(0).trim();
+				return first.isEmpty() ? "exit code " + p.exitValue() : first;
+			} finally {
+				p.destroyForcibly();
+			}
+		} catch (IOException e) {
+			return String.valueOf(e.getMessage());
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			return "interrupted";
+		} finally {
+			if( out != null ) {
+				out.delete();
+			}
+		}
 	}
 
 	/**
