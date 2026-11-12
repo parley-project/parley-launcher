@@ -1,34 +1,50 @@
 package us.bringardner.parley.launcher;
 
+import java.io.BufferedReader;
 import java.io.File;
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
+import java.io.InputStreamReader;
+import java.nio.charset.Charset;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 /**
- * What the launcher script runs when a program's saved command is missing or out of date:
+ * What the launcher's script (parley) runs for everything but starting a program whose saved
+ * command is current.
+ *
+ * To make a program's command when it is missing or out of date:
  *
  * <pre>
  * java -jar parley-launcher.jar resolve --app NAME --app-file FILE --java JAVA --cache BASE [--key KEY]
  * </pre>
  *
- * It works out the command (Resolver) and writes it for the script: BASE.args, the key (the script's
- * choice of Java, so a different one makes the command again) then one word of the command a line,
- * and BASE.check, the files that make it out of date when they change (a "!" before a path: when
- * it comes to exist). Exits 1, with the reason on standard error, when the program can't be run.
+ * It works out the command (Resolver) and saves it for the script (SavedCommand). Exits 1, with the
+ * reason on standard error, when the program can't be run.
+ *
+ * To manage the programs (ProgramCommands), the script says where the installation is, then the
+ * command as it was typed:
  *
  * <pre>
- * java -jar parley-launcher.jar choose [GROUP:]ARTIFACT[:VERSION]
- * java -jar parley-launcher.jar versions [GROUP:]ARTIFACT[:VERSION]
+ * java -jar parley-launcher.jar --prefix PREFIX [--bin BIN] [--java JAVA --key KEY] COMMAND ...
+ *
+ *   add NAME [[GROUP:]ARTIFACT[:VERSION] | VERSION] [MAIN]
+ *   remove NAME
+ *   list
+ *   update [NAME ...]
+ *   available
  * </pre>
  *
- * choose prints the full coordinates what was typed means (see Chooser), asking which version on
- * standard error when there is more than one; versions lists them all, newest first.
+ * --java and --key: add and update make the program's command at once, for that java (left out:
+ * it is made at the program's first start).
+ *
+ * <pre>
+ * java -jar parley-launcher.jar versions [GROUP:]ARTIFACT[:VERSION]
+ * java -jar parley-launcher.jar choose [GROUP:]ARTIFACT[:VERSION]
+ * </pre>
+ *
+ * versions lists every version found, newest first. choose prints the full coordinates what was
+ * typed means (see Chooser), asking which version on standard error when there is more than one
+ * (the Windows script's add uses it).
  */
 public final class Main {
 
@@ -37,48 +53,104 @@ public final class Main {
 	}
 
 	static int run(String[] args) {
-		String cmd = args.length == 0 ? "--help" : args[0];
+		// the installation, before the command
+		String prefix = null, bin = null, java = null, key = "";
+		int at = 0;
+		while (at + 1 < args.length && (args[at].equals("--prefix") || args[at].equals("--bin") || args[at].equals("--java")
+				|| args[at].equals("--key")) && !"resolve".equals(args[0])) {
+			String v = args[at + 1];
+			switch (args[at]) {
+			case "--prefix": prefix = v; break;
+			case "--bin": bin = v; break;
+			case "--java": java = v; break;
+			default: key = v;
+			}
+			at += 2;
+		}
+		String cmd = at >= args.length ? "--help" : args[at];
+		List<String> rest = new ArrayList<>(Arrays.asList(args).subList(Math.min(at + 1, args.length), args.length));
+
 		if( "--version".equals(cmd) ) {
 			Package p = Main.class.getPackage();
 			System.out.println("parley-launcher " + (p.getImplementationVersion() == null ? "(development)" : p.getImplementationVersion()));
 			return 0;
 		}
-		if( "choose".equals(cmd) || "versions".equals(cmd) ) {
-			if( args.length != 2 ) {
-				System.err.println("usage: parley-launcher " + cmd + " [GROUP:]ARTIFACT[:VERSION]");
-				return 2;
-			}
-			Chooser chooser = new Chooser(new Repositories(Locations.fromEnvironment(), w -> System.err.println("parley-launcher: note: " + w)),
-					w -> System.err.println("parley-launcher: note: " + w));
-			try {
-				if( "versions".equals(cmd) ) {
-					List<Chooser.Found> found = chooser.versions(args[1]);
-					int def = Chooser.defaultIndex(found);
-					for(int i = 0; i < found.size(); i++) {
-						System.out.println(found.get(i) + (i == def ? "  [default]" : ""));
-					}
-					if( found.isEmpty() ) {
-						System.err.println("parley-launcher: no version of " + args[1] + " was found");
-						return 1;
-					}
-				} else {
-					// (the prompt on standard error, so the script can take the answer from standard output)
-					System.out.println(chooser.choose(args[1],
-							new java.io.BufferedReader(new java.io.InputStreamReader(System.in, java.nio.charset.Charset.defaultCharset())),
-							System.err));
-				}
-				return 0;
-			} catch (LaunchException e) {
-				System.err.println("parley-launcher: " + e.getMessage());
-				return 1;
-			}
-		}
-		if( !"resolve".equals(cmd) ) {
-			System.err.println("usage: parley-launcher resolve --app NAME --app-file FILE --java JAVA --cache BASE [--key KEY]");
-			System.err.println("       parley-launcher choose [GROUP:]ARTIFACT[:VERSION]");
+		switch (cmd) {
+		case "add":
+		case "remove":
+		case "list":
+		case "update":
+		case "available":
+			return manage(cmd, rest, prefix, bin, java, key);
+		case "choose":
+		case "versions":
+			return chooseOrVersions(cmd, rest);
+		case "resolve":
+			return resolve(args);
+		default:
+			System.err.println("usage: parley-launcher --prefix PREFIX [--bin BIN] [--java JAVA --key KEY] add|remove|list|update|available ...");
+			System.err.println("       parley-launcher resolve --app NAME --app-file FILE --java JAVA --cache BASE [--key KEY]");
 			System.err.println("       parley-launcher versions [GROUP:]ARTIFACT[:VERSION]");
+			System.err.println("       parley-launcher choose [GROUP:]ARTIFACT[:VERSION]");
 			return "--help".equals(cmd) ? 0 : 2;
 		}
+	}
+
+	/** add, remove, list, update, available */
+	private static int manage(String cmd, List<String> rest, String prefix, String bin, String java, String key) {
+		if( prefix == null ) {
+			System.err.println("parley-launcher: " + cmd + " needs --prefix (the folder the launcher is installed in)");
+			return 2;
+		}
+		boolean windows = System.getProperty("os.name", "").toLowerCase().startsWith("windows");
+		ProgramRegistry registry = new ProgramRegistry(new File(prefix), bin == null || bin.isEmpty() ? null : new File(bin), windows);
+		ProgramCommands commands = new ProgramCommands(registry, Locations.fromEnvironment(), Catalog.builtIn(),
+				new BufferedReader(new InputStreamReader(System.in, Charset.defaultCharset())), System.out, System.err);
+		if( java != null ) {
+			commands.makeCommandsFor(java, key);
+		}
+		switch (cmd) {
+		case "add": return commands.add(rest);
+		case "remove": return commands.remove(rest);
+		case "list": return commands.list(rest);
+		case "update": return commands.update(rest);
+		default: return commands.available(rest);
+		}
+	}
+
+	private static int chooseOrVersions(String cmd, List<String> rest) {
+		if( rest.size() != 1 ) {
+			System.err.println("usage: parley " + cmd + " [GROUP:]ARTIFACT[:VERSION]");
+			return 2;
+		}
+		String spec = rest.get(0);
+		Chooser chooser = new Chooser(new Repositories(Locations.fromEnvironment(), w -> System.err.println("parley: note: " + w)),
+				w -> System.err.println("parley: note: " + w));
+		try {
+			if( "versions".equals(cmd) ) {
+				List<Chooser.Found> found = chooser.versions(spec);
+				int def = Chooser.defaultIndex(found);
+				for(int i = 0; i < found.size(); i++) {
+					System.out.println(found.get(i) + (i == def ? "  [default]" : ""));
+				}
+				if( found.isEmpty() ) {
+					System.err.println("parley: no version of " + spec + " was found");
+					return 1;
+				}
+			} else {
+				// (the prompt on standard error, so the script can take the answer from standard output)
+				System.out.println(chooser.choose(spec,
+						new BufferedReader(new InputStreamReader(System.in, Charset.defaultCharset())), System.err));
+			}
+			return 0;
+		} catch (LaunchException e) {
+			System.err.println("parley: " + e.getMessage());
+			return 1;
+		}
+	}
+
+	/** resolve --app NAME --app-file FILE --java JAVA --cache BASE [--key KEY] */
+	private static int resolve(String[] args) {
 		String app = null, appFile = null, java = null, cache = null, key = "";
 		for(int i = 1; i < args.length; i++) {
 			String a = args[i];
@@ -100,79 +172,13 @@ public final class Main {
 		}
 		final String name = app;
 		try {
-			Resolver.Launch launch = new Resolver(Locations.fromEnvironment(),
-					w -> System.err.println(name + ": note: " + w)).resolve(app, new File(appFile), java);
-			// (the java too: when it is gone, another is found; this launcher's jar: an upgrade makes
-			// the commands again; Maven's settings.xml: it may move the user repository)
-			launch.checks.add(0, new File(java).getAbsolutePath());
-			File self = selfJar();
-			if( self != null ) {
-				launch.checks.add(self.getAbsolutePath());
-			}
-			File settings = new File(new File(System.getProperty("user.home"), ".m2"), "settings.xml");
-			launch.checks.add((settings.isFile() ? "" : "!") + settings.getAbsolutePath());
-			// ("retry": made again at the next start, when something failed that may work later, or
-			// when a SNAPSHOT or a plugins.list changed in this very second, which a shell comparing
-			// whole seconds would miss)
-			long now = System.currentTimeMillis() / 1000;
-			boolean retry = launch.retry;
-			for(String c : launch.checks) {
-				if( !c.startsWith("!") && (c.contains("-SNAPSHOT") || c.endsWith("plugins.list"))
-						&& new File(c).lastModified() / 1000 >= now ) {
-					retry = true;
-				}
-			}
-			if( retry ) {
-				launch.checks.add("retry");
-			}
-			write(new File(cache + ".check").toPath(), launch.checks);
-			List<String> lines = new ArrayList<>();
-			lines.add(key);
-			lines.addAll(launch.command);
-			for(String l : lines) {
-				if( l.indexOf('\n') >= 0 ) {
-					throw new LaunchException("a path with a line break can't be used: " + l);
-				}
-			}
-			// (args last: the script takes it as current only when it is newer than the files it checks)
-			write(new File(cache + ".args").toPath(), lines);
+			Resolver.Launch launch = new Resolver(Locations.fromEnvironment(), w -> System.err.println(name + ": note: " + w),
+					new ProgramCommands.PrintedProgress(System.err)).resolve(app, new File(appFile), java);
+			SavedCommand.write(launch, java, new File(cache), key);
 			return 0;
 		} catch (LaunchException e) {
 			System.err.println(e.getMessage().startsWith(app) ? e.getMessage() : app + ": " + e.getMessage());
 			return 1;
-		} catch (IOException e) {
-			System.err.println(app + ": can't write " + cache + ".args: " + e.getMessage());
-			return 1;
-		}
-	}
-
-	/** the jar this class came from, or null */
-	private static File selfJar() {
-		try {
-			java.security.CodeSource cs = Main.class.getProtectionDomain().getCodeSource();
-			if( cs != null && cs.getLocation() != null ) {
-				File f = new File(cs.getLocation().toURI());
-				return f.isFile() ? f : null;
-			}
-		} catch (java.net.URISyntaxException | RuntimeException e) {
-			// (none)
-		}
-		return null;
-	}
-
-	private static void write(Path p, List<String> lines) throws IOException {
-		Files.createDirectories(p.getParent());
-		Path tmp = Files.createTempFile(p.getParent(), p.getFileName().toString(), ".part");
-		try {
-			Files.write(tmp, (String.join("\n", lines) + "\n").getBytes(StandardCharsets.UTF_8));
-			Repositories.readable(tmp);
-			try {
-				Files.move(tmp, p, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-			} catch (AtomicMoveNotSupportedException e) {
-				Files.move(tmp, p, StandardCopyOption.REPLACE_EXISTING);
-			}
-		} finally {
-			Files.deleteIfExists(tmp);
 		}
 	}
 }

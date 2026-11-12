@@ -1,15 +1,18 @@
 #!/bin/sh
 # Install parley-launcher from this folder:
 #
-#   PREFIX/bin/parley-launcher   the launcher; each program is a link to it, named for it
+#   PREFIX/bin/parley            the launcher; each program is a link to it, named for it
+#   PREFIX/bin/parley-launcher   its earlier name: a link to it
 #   PREFIX/lib                   parley-launcher.jar
-#   PREFIX/apps                  NAME.properties for each program (parley-launcher add)
-#   BIN/parley-launcher          a link to it, and BIN/NAME for each program added
+#   PREFIX/apps                  NAME.properties for each program (parley add)
+#   BIN/parley                   a link to it (and BIN/parley-launcher), and BIN/NAME for each
+#                                program added
 #
 # PREFIX is /usr/local/lib/parley/launcher (BIN /usr/local/bin), or with --user
 # ~/.parley/launcher (BIN ~/.local/bin). Then add the programs, for example:
 #
-#   parley-launcher add fsh                      (picks the version; or fsh:2.0.0, us.bringardner:fsh:2.0.0)
+#   parley add fsh                               (picks the version; or: parley add fsh 2.0.0)
+#   parley available                             (the programs it knows by name)
 #
 # Usage: ./install.sh [--user] [--prefix DIR] [--bin DIR] [--uninstall]
 # Running it again (from a newer one) upgrades: bin and lib are replaced, apps are kept.
@@ -78,7 +81,7 @@ ours() {
 }
 
 if [ -n "$uninstall" ]; then
-	[ -f "$prefix/bin/parley-launcher" ] || { echo "parley-launcher is not installed in $prefix"; exit 0; }
+	[ -f "$prefix/bin/parley" ] || [ -f "$prefix/bin/parley-launcher" ] || { echo "parley is not installed in $prefix"; exit 0; }
 	for l in "$bin"/*; do
 		if ours "$l"; then
 			$SUDO rm -f "$l"
@@ -86,27 +89,30 @@ if [ -n "$uninstall" ]; then
 	done
 	$SUDO rm -rf "$prefix/bin" "$prefix/lib" "$prefix/apps" "$prefix/launcher.conf" "$prefix/LICENSE"
 	$SUDO rmdir "$prefix" 2> /dev/null || true
-	echo "parley-launcher removed from $prefix"
+	echo "parley removed from $prefix"
 	exit 0
 fi
 
-[ -f "$SRC/lib/parley-launcher.jar" ] && [ -f "$SRC/bin/parley-launcher" ] || { echo "$0: run this from the unpacked parley-launcher folder" >&2; exit 1; }
+[ -f "$SRC/lib/parley-launcher.jar" ] && [ -f "$SRC/bin/parley" ] || { echo "$0: run this from the unpacked parley-launcher folder" >&2; exit 1; }
 [ "$SRC" != "$prefix" ] || { echo "$0: this folder is $prefix already" >&2; exit 1; }
 
 $SUDO mkdir -p "$prefix/bin" "$prefix/lib" "$prefix/apps" "$bin"
-$SUDO cp "$SRC/bin/parley-launcher" "$prefix/bin/parley-launcher.new"
-$SUDO mv -f "$prefix/bin/parley-launcher.new" "$prefix/bin/parley-launcher"
+$SUDO cp "$SRC/bin/parley" "$prefix/bin/parley.new"
+$SUDO mv -f "$prefix/bin/parley.new" "$prefix/bin/parley"
+# (the earlier name stays a command; the programs an earlier launcher added are links to it)
+$SUDO ln -sf parley "$prefix/bin/parley-launcher"
 $SUDO cp "$SRC/lib/parley-launcher.jar" "$prefix/lib/parley-launcher.jar.new"
 $SUDO mv -f "$prefix/lib/parley-launcher.jar.new" "$prefix/lib/parley-launcher.jar"
 [ -f "$SRC/LICENSE" ] && $SUDO cp "$SRC/LICENSE" "$prefix/"
 printf 'bin=%s\n' "$bin" | $SUDO tee "$prefix/launcher.conf" > /dev/null
-$SUDO chmod 755 "$prefix/bin/parley-launcher"
+$SUDO chmod 755 "$prefix/bin/parley"
 $SUDO chmod -R a+rX "$prefix/bin" "$prefix/lib" "$prefix/apps" "$prefix/launcher.conf"
+$SUDO ln -sf "$prefix/bin/parley" "$bin/parley"
 $SUDO ln -sf "$prefix/bin/parley-launcher" "$bin/parley-launcher"
 # (the programs already added keep their links: an upgrade replaced only what they point at)
 
-echo "parley-launcher installed in $prefix, with $bin/parley-launcher"
-echo "add a program with: parley-launcher add NAME [[GROUP:]ARTIFACT[:VERSION]] (parley-launcher --help)"
+echo "parley installed in $prefix, with $bin/parley"
+echo "add a program with: parley add NAME (parley available lists them; parley --help)"
 case :$PATH: in
 *:"$bin":*) ;;
 *) echo "note: $bin is not on your PATH; add it to run the programs by name" ;;

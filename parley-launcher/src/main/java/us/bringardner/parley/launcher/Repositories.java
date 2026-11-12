@@ -40,11 +40,18 @@ public final class Repositories {
 
 	private final Locations where;
 	private final Consumer<String> warn;
+	private final ProgressListener progress;
 	private HttpClient http;
 
 	public Repositories(Locations where, Consumer<String> warn) {
+		this(where, warn, ProgressListener.NONE);
+	}
+
+	/** As Repositories(where, warn), with progress told of each jar as it is downloaded */
+	public Repositories(Locations where, Consumer<String> warn, ProgressListener progress) {
 		this.where = where;
 		this.warn = warn;
+		this.progress = progress == null ? ProgressListener.NONE : progress;
 	}
 
 	/**
@@ -305,9 +312,12 @@ public final class Repositories {
 		}
 		String url = where.snapshots + dirPath + name;
 		Path part = null;
+		boolean told = false;
 		try {
 			Files.createDirectories(target.getParentFile().toPath());
 			part = Files.createTempFile(target.getParentFile().toPath(), name, ".part");
+			progress.downloading(c, name);
+			told = true;
 			int status = get(url, part);
 			if( status == 404 ) {
 				throw new LaunchException(c + " is not on " + where.snapshots + " (" + url + ")");
@@ -321,8 +331,11 @@ public final class Repositories {
 				throw new LaunchException("the " + c + " downloaded from " + url + " does not match its SHA-1 ("
 						+ sha1 + ", " + url + ".sha1 says " + want + ")");
 			}
+			long size = Files.size(part);
 			moveInto(part, target.toPath());
 			part = null;
+			told = false;
+			progress.downloaded(c, name, size);
 			writeText(sha1File.toPath(), sha1);
 			return target;
 		} catch (IOException e) {
@@ -331,6 +344,9 @@ public final class Repositories {
 			Thread.currentThread().interrupt();
 			throw new LaunchException("downloading " + c + " was interrupted", e).temporary();
 		} finally {
+			if( told ) {
+				progress.failed(c, name);
+			}
 			if( part != null ) {
 				try {
 					Files.deleteIfExists(part);
@@ -383,8 +399,11 @@ public final class Repositories {
 		}
 		String url = where.central + c.path();
 		Path part = null;
+		boolean told = false;
 		try {
 			part = Files.createTempFile(dir.toPath(), target.getName(), ".part");
+			progress.downloading(c, target.getName());
+			told = true;
 			int status = get(url, part);
 			if( status == 404 ) {
 				throw new LaunchException(c + " is not on Maven Central (" + url + ")");
@@ -406,8 +425,11 @@ public final class Repositories {
 							+ "SHA-1 (" + sha1 + ", " + url + ".sha1 says " + want + ")");
 				}
 			}
+			long size = Files.size(part);
 			moveInto(part, target.toPath());
 			part = null;
+			told = false;
+			progress.downloaded(c, target.getName(), size);
 			writeText(new File(target.getPath() + ".sha1").toPath(), sha1);
 			Set<String> names = new LinkedHashSet<>();
 			names.add(target.getName());
@@ -429,6 +451,9 @@ public final class Repositories {
 			Thread.currentThread().interrupt();
 			throw new LaunchException("downloading " + c + " was interrupted", e).temporary();
 		} finally {
+			if( told ) {
+				progress.failed(c, target.getName());
+			}
 			if( part != null ) {
 				try {
 					Files.deleteIfExists(part);

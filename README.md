@@ -1,18 +1,22 @@
 # parley-launcher
 
-Runs a Parley program on a Java that is already installed (11 or later). Every program (fsh,
-fsh-ide, pssh, parley-files-viewer ...) starts through one script, renamed or linked for it. The
+Runs a Parley program on a Java that is already installed (11 or later). Its command is `parley`
+(`parley-launcher`, the earlier name, still works). Every program (fsh, fsh-ide, pssh,
+parley-files-viewer ...) starts through one script, renamed or linked for it. The
 script makes sure every jar the program needs is on the machine, fetching the missing ones from
 Maven Central, then runs it. The programs share their jars the way Maven projects share
 `~/.m2/repository`: one copy of `parley-core-2.0.0.jar`, whatever uses it.
 
 ```sh
 tar xzf parley-launcher-2.0.0.tar.gz && parley-launcher-2.0.0/install.sh   # or --user
-parley-launcher add fsh            # pick the version; the newest release is the default
+parley available          # the programs it knows by name
+parley add fsh            # pick the version; the newest release is the default
 fsh
+parley update             # later: move the programs to their newest versions
 ```
 
-On Windows, from the `.zip` (in a Command Prompt; `--user` installs for you alone, without it needs an
+On Windows the command is still `parley-launcher` (its script hasn't been moved to the new commands
+yet: no `update`, `available` or short names there), installed from the `.zip` (in a Command Prompt; `--user` installs for you alone, without it needs an
 administrator's prompt):
 
 ```bat
@@ -66,30 +70,36 @@ fsh
 
 | Command | |
 |---|---|
-| `parley-launcher add NAME [[GROUP:]ARTIFACT[:VERSION]]` | Add a program (see below for leaving out the artifact, group or version): `PREFIX/apps/NAME.properties`, a link `NAME` beside the launcher and in the bin folder, and its command made at once (so a missing jar shows now). As root (`sudo`, for a system-wide install), each user's command is made at their own first start instead, so root never writes into a user's `~/.m2`. It refuses a name that is already some other command |
-| `parley-launcher versions [GROUP:]ARTIFACT` | The versions found, newest first, the default marked |
-| `parley-launcher remove NAME` | Remove one |
-| `parley-launcher list` | The programs and their artifacts |
-| `parley-launcher command NAME` | The command NAME runs, one word a line |
+| `parley add NAME` | Add a program the launcher knows by name (see `parley available`), picking its version: `PREFIX/apps/NAME.properties`, a link `NAME` beside the launcher and in the bin folder, and its command made at once (so a missing jar shows now, each download named as it happens). As root (`sudo`, for a system-wide install), each user's command is made at their own first start instead, so root never writes into a user's `~/.m2`. It refuses a name that is already some other command |
+| `parley add NAME VERSION` | That version, with no question |
+| `parley add NAME [GROUP:]ARTIFACT[:VERSION] [MAIN]` | Add any program built for the launcher (see below for leaving out the group or version) |
+| `parley available` | The programs the launcher knows by name, and which are added |
+| `parley list` | The programs added and their artifacts |
+| `parley update [NAME ...]` | Move the programs (or those named) to their newest version, and make their commands again. A program on a release moves to the newest release; one on a SNAPSHOT to the newest version of all |
+| `parley versions [GROUP:]ARTIFACT` | The versions found, newest first, the default marked |
+| `parley remove NAME` | Remove one |
+| `parley command NAME` | The command NAME runs, one word a line |
 
-The artifact, the group and the version can be left out of `add`:
+What `add` works out for itself:
 
-1. **No artifact** (`parley-launcher add fsh`): the program's name is the artifact. To name
-   another main class (the fourth argument), the artifact must be given.
-2. **No group** (`fsh`, `fsh:2.0.0`): the artifact is looked for in `us.bringardner`, then
+1. **A name the launcher knows** (`parley add pssh`): its group, artifact and, where it has one,
+   its main class come from the launcher's list of the Parley programs
+   (`META-INF/parley/programs.list` in its jar).
+2. **Any other name** (`parley add newthing`): the program's name is the artifact.
+3. **No group** (`fsh`, `fsh:2.0.0`): the artifact is looked for in `us.bringardner`, then
    `us.bringardner.parley`. A second part that starts with a digit is a version (`fsh:2.0.0`);
    otherwise it is the group and the artifact (`us.bringardner.parley:parley-ssh`).
-3. **No version**: the versions on Maven Central and its snapshot repository (their
+4. **No version**: the versions on Maven Central and its snapshot repository (their
    `maven-metadata.xml`) and in the machine and user repositories (a SNAPSHOT that `mvn install` put there) are listed, newest first, and you
    pick one by its number or its version. Enter takes the default: the newest release, or the
    newest SNAPSHOT when there is no release. With only one version there is no question; with no
    answer at all (no terminal) the default is taken. When the artifact is in both groups, both
    are listed. `PARLEY_OFFLINE=true`, or Central out of reach, lists this machine's versions only.
-4. The app file always gets the full `group:artifact:version` that was picked, so the program
-   doesn't change version until it is added again.
+5. The app file always gets the full `group:artifact:version` that was picked, so the program
+   doesn't change version until `parley update` or until it is added again.
 
-`install.sh` installs the launcher in `/usr/local/lib/parley/launcher`, linked from
-`/usr/local/bin` (sudo asks), or with `--user` in `~/.parley/launcher`, linked from
+`install.sh` installs the launcher in `/usr/local/lib/parley/launcher`, with `parley` (and
+`parley-launcher`) linked from `/usr/local/bin` (sudo asks), or with `--user` in `~/.parley/launcher`, linked from
 `~/.local/bin`. Running a newer one's `install.sh` upgrades it; `--uninstall` removes it and the
 programs' links (the jars stay in the repositories, which are Maven's too).
 
@@ -115,14 +125,18 @@ what the shell script does, with these differences:
 
 | Command | Add it with |
 |---|---|
-| `fsh` | `parley-launcher add fsh` (or `us.bringardner:fsh:VERSION`) |
-| `fsh-ide` | `parley-launcher add fsh-ide us.bringardner:fsh-ide:VERSION` |
-| `fsh-ide-fx` (JavaFX) | `parley-launcher add fsh-ide-fx us.bringardner:fsh-ide:VERSION us.bringardner.fsh.ide.fx.FshIdeFx` |
-| `fshdb` | `parley-launcher add fshdb us.bringardner:fshdb:VERSION` |
-| `pssh` | `parley-launcher add pssh us.bringardner.parley:parley-ssh:VERSION` |
-| `parley-files-viewer` | `parley-launcher add parley-files-viewer us.bringardner.parley:parley-files-viewer:VERSION` |
-| `parley-files-viewer-fx` (JavaFX) | `parley-launcher add parley-files-viewer-fx us.bringardner.parley:parley-files-viewer:VERSION us.bringardner.parley.files.viewer.fx.Launcher` |
-| `pfv` | `parley-launcher add pfv us.bringardner.parley:parley-files-viewer-tui:VERSION` |
+| `fsh` | `parley add fsh` |
+| `fsh-ide` | `parley add fsh-ide` |
+| `fsh-ide-fx` (JavaFX) | `parley add fsh-ide-fx` |
+| `fshdb` | `parley add fshdb` |
+| `pssh` | `parley add pssh` |
+| `parley-files-viewer` | `parley add parley-files-viewer` |
+| `parley-files-viewer-fx` (JavaFX) | `parley add parley-files-viewer-fx` |
+| `pfv` | `parley add pfv` |
+
+On Windows, for now, each needs its artifact (and the JavaFX ones their main class), as in
+`parley-launcher add pssh us.bringardner.parley:parley-ssh` and
+`parley-launcher add fsh-ide-fx us.bringardner:fsh-ide us.bringardner.fsh.ide.fx.FshIdeFx`.
 
 The last argument of `add` names another main class in the same jar (`main=` in the app file).
 fsh-ide and fshdb run fsh scripts, so they use fsh's native jar too. The JavaFX programs get
@@ -200,15 +214,18 @@ for where the program runs (`linux`, `mac-aarch64`, `win` ...), checked against 
 
 ## Not yet (phase 2)
 
-1. Filling the machine repository (`parley-launcher fetch APP --machine`), which is also how a
+1. Filling the machine repository (`parley fetch APP --machine`), which is also how a
    machine without internet access is filled.
 2. Checking Maven Central's GPG signatures.
 
 ## Layout
 
-- `parley-launcher`: the launcher (no dependencies). `Main` is what the script runs when a
-  command must be made. `Resolver` works it out, `Repositories` finds and downloads the jars, and
-  `LaunchList` is the list's format. `src/main/scripts` holds the scripts (`parley-launcher` and `install.sh`; `parley-launcher.cmd` and `install.cmd` for Windows), and
+- `parley-launcher`: the launcher (no dependencies). `Main` is what the script runs for everything
+  but starting a program whose command is saved. `ProgramRegistry` holds the programs added,
+  `ProgramCommands` is add, remove, list, update and available, and `Catalog` the programs known
+  by name. `Resolver` works out a program's command, `Repositories` finds and downloads the jars,
+  `SavedCommand` keeps the command for the script, and `LaunchList` is the list's format.
+  `src/main/scripts` holds the scripts (`parley` and `install.sh`; `parley-launcher.cmd` and `install.cmd` for Windows), and
   `target/parley-launcher-VERSION.tar.gz` is what a user unpacks.
 - `parley-launcher-maven-plugin`: the `list` goal.
 
