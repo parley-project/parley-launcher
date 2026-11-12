@@ -10,7 +10,7 @@
 	<baseDirectory>parley-launcher-${project.version}</baseDirectory>
 	<files>
 		<file>
-			<source>src/main/scripts/parley-launcher</source>
+			<source>src/main/scripts/parley</source>
 			<outputDirectory>bin</outputDirectory>
 			<fileMode>0755</fileMode>
 			<lineEnding>unix</lineEnding>

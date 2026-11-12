@@ -757,4 +757,247 @@ class LauncherTest {
 		assertTrue(checks.stream().anyMatch(x -> x.startsWith("until ")), checks.toString());
 		assertNull(asked.get("snapshots/org/x/lib/1.0-SNAPSHOT/lib-1.0-20261031.120000-3-linux-x86_64.jar"));
 	}
+
+	// ---- the programs: the catalog, the registry, and parley add / remove / list / update / available
+
+	static final boolean WINDOWS = System.getProperty("os.name", "").toLowerCase().startsWith("windows");
+
+	final java.io.ByteArrayOutputStream printed = new java.io.ByteArrayOutputStream();
+	final java.io.ByteArrayOutputStream errors = new java.io.ByteArrayOutputStream();
+
+	ProgramRegistry registry() {
+		return new ProgramRegistry(tmp.resolve("prefix").toFile(), tmp.resolve("bin").toFile(), WINDOWS);
+	}
+
+	/** the commands, with this typed as the answer to any question; make: commands are made as programs are added */
+	ProgramCommands commands(String answer, boolean make) {
+		ProgramCommands c = new ProgramCommands(registry(), where, Catalog.builtIn(),
+				new java.io.BufferedReader(new java.io.StringReader(answer)), new java.io.PrintStream(printed, true),
+				new java.io.PrintStream(errors, true));
+		if( make ) {
+			c.makeCommandsFor("/j/bin/java", "KEY");
+		}
+		return c;
+	}
+
+	String printed() {
+		return new String(printed.toByteArray(), StandardCharsets.UTF_8);
+	}
+
+	String errors() {
+		return new String(errors.toByteArray(), StandardCharsets.UTF_8);
+	}
+
+	/** a program's jar on the stand-in: these versions of group:artifact, each with a launcher list */
+	void program(String group, String artifact, String... versions) throws Exception {
+		metadata(group, artifact, versions);
+		for(String v : versions) {
+			publish(new Coordinates(group, artifact, "jar", "", v),
+					jar(LaunchList.RESOURCE, LaunchList.HEADER + "\nmain=org.x.Main\njava=11\n", "v", v));
+		}
+	}
+
+	static List<String> args(String... a) {
+		return java.util.Arrays.asList(a);
+	}
+
+	@Test
+	void theCatalogKnowsTheParleyPrograms() {
+		Catalog c = Catalog.builtIn();
+		assertEquals("us.bringardner.parley:parley-ssh", c.find("pssh").artifact());
+		assertNull(c.find("pssh").mainClass);
+		assertEquals("us.bringardner:fsh-ide", c.find("fsh-ide-fx").artifact());
+		assertEquals("us.bringardner.fsh.ide.fx.FshIdeFx", c.find("fsh-ide-fx").mainClass);
+		assertNull(c.find("no-such-program"));
+		assertFalse(c.find("fsh").description.isEmpty());
+	}
+
+	@Test
+	void aCatalogLineThatIsWrongIsRefused() {
+		assertThrows(IOException.class, () -> Catalog.read(new ByteArrayInputStream("fsh | not-coordinates\n".getBytes(StandardCharsets.UTF_8))));
+	}
+
+	@Test
+	void theRegistryAddsListsAndRemoves() throws Exception {
+		ProgramRegistry r = registry();
+		assertTrue(r.list().isEmpty());
+		assertNull(r.find("fsh"));
+		r.add(new Program("fsh", Coordinates.parse("us.bringardner:fsh:2.0.0"), null));
+		r.add(new Program("fsh-ide-fx", Coordinates.parse("us.bringardner:fsh-ide:2.0.0"), "x.Fx"));
+		assertEquals("# fsh: the program the command fsh runs\nartifact=us.bringardner:fsh:2.0.0\n",
+				new String(Files.readAllBytes(r.appFile("fsh").toPath()), StandardCharsets.UTF_8));
+		assertEquals("[fsh (us.bringardner:fsh:2.0.0), fsh-ide-fx (us.bringardner:fsh-ide:2.0.0)]", r.list().toString());
+		assertEquals("x.Fx", r.find("fsh-ide-fx").mainClass);
+		File inner = r.commands("fsh").get(0);
+		File outer = r.commands("fsh").get(1);
+		if( WINDOWS ) {
+			assertTrue(new String(Files.readAllBytes(outer.toPath()), StandardCharsets.UTF_8).contains("PARLEY_APP=fsh"));
+		} else {
+			// (a link to the script beside it, and a link to that in the bin folder)
+			assertEquals("parley", Files.readSymbolicLink(inner.toPath()).toString());
+			assertEquals(inner.getPath(), Files.readSymbolicLink(outer.toPath()).toString());
+		}
+		// (adding it again replaces it)
+		r.add(new Program("fsh", Coordinates.parse("us.bringardner:fsh:2.1.0"), null));
+		assertEquals("2.1.0", r.find("fsh").coordinates.version);
+
+		File cache = new File(where.launcherHome, "cache");
+		cache.mkdirs();
+		Files.write(new File(cache, "fsh.args").toPath(), new byte[0]);
+		r.remove("fsh", where.launcherHome);
+		assertNull(r.find("fsh"));
+		assertFalse(Files.exists(inner.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS));
+		assertFalse(Files.exists(outer.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS));
+		assertFalse(new File(cache, "fsh.args").exists());
+		assertThrows(LaunchException.class, () -> r.remove("fsh", where.launcherHome));
+	}
+
+	@Test
+	void anotherCommandOfThatNameIsNotReplaced() throws Exception {
+		ProgramRegistry r = registry();
+		File other = r.commands("ls").get(1);
+		other.getParentFile().mkdirs();
+		Files.write(other.toPath(), "someone else's".getBytes(StandardCharsets.UTF_8));
+		LaunchException e = assertThrows(LaunchException.class, () -> r.add(new Program("ls", Coordinates.parse("g:a:1"), null)));
+		assertTrue(e.getMessage().contains("is there already"), e.getMessage());
+		assertFalse(r.appFile("ls").exists());
+		assertEquals("someone else's", new String(Files.readAllBytes(other.toPath()), StandardCharsets.UTF_8));
+	}
+
+	@Test
+	void namesThatCantBePrograms() {
+		for(String bad : new String[] { "", ".hidden", "-x", "a/b", "a b", "parley", "parley-launcher", "a:b" }) {
+			assertNotNull(ProgramRegistry.badName(bad), bad);
+		}
+		assertNull(ProgramRegistry.badName("fsh-ide"));
+	}
+
+	@Test
+	void windowsCommandsAreSmallCmdFiles() throws Exception {
+		ProgramRegistry r = new ProgramRegistry(tmp.resolve("prefix").toFile(), tmp.resolve("bin").toFile(), true);
+		r.add(new Program("fsh", Coordinates.parse("us.bringardner:fsh:2.0.0"), null));
+		File outer = r.commands("fsh").get(1);
+		assertEquals("fsh.cmd", outer.getName());
+		String text = new String(Files.readAllBytes(outer.toPath()), StandardCharsets.UTF_8);
+		assertEquals("@setlocal & set \"PARLEY_APP=fsh\" & \"" + tmp.resolve("prefix").toFile().getAbsolutePath()
+				+ "\\bin\\parley-launcher.cmd\" %*\r\n", text);
+		r.remove("fsh", where.launcherHome);
+		assertFalse(outer.exists());
+	}
+
+	@Test
+	void addByNameTakesTheCatalogsArtifactAndMakesTheCommand() throws Exception {
+		program("us.bringardner.parley", "parley-ssh", "1.0.0", "1.1.0");
+		assertEquals(0, commands("\n", true).add(args("pssh")), errors());
+		assertEquals("us.bringardner.parley:parley-ssh:1.1.0", registry().find("pssh").coordinates.toString());
+		assertTrue(printed().startsWith("added pssh (us.bringardner.parley:parley-ssh:1.1.0): "), printed());
+		// (what is downloaded is said)
+		assertTrue(errors().contains("  downloading parley-ssh-1.1.0.jar ... "), errors());
+		List<String> saved = Files.readAllLines(new File(where.launcherHome, "cache/pssh.args").toPath());
+		assertEquals("KEY", saved.get(0));
+		assertEquals("/j/bin/java", saved.get(1));
+		assertEquals("org.x.Main", saved.get(saved.size() - 1));
+		assertTrue(new File(where.launcherHome, "cache/pssh.check").isFile());
+	}
+
+	@Test
+	void addWithOnlyAVersionAsksNothing() throws Exception {
+		program("us.bringardner.parley", "parley-ssh", "1.0.0", "1.1.0");
+		assertEquals(0, commands("", false).add(args("pssh", "1.0.0")), errors());
+		assertEquals("us.bringardner.parley:parley-ssh:1.0.0", registry().find("pssh").coordinates.toString());
+		assertFalse(errors().contains("Which one?"), errors());
+		// (commands aren't made here: at the program's first start)
+		assertFalse(new File(where.launcherHome, "cache/pssh.args").exists());
+		assertTrue(printed().contains("each user's first pssh fetches what it needs"), printed());
+	}
+
+	@Test
+	void addTakesTheCatalogsMainClassForItsArtifactOnly() throws Exception {
+		program("us.bringardner", "fsh-ide", "2.0.0");
+		program("org.other", "thing", "1.0");
+		assertEquals(0, commands("", false).add(args("fsh-ide-fx")), errors());
+		assertEquals("us.bringardner.fsh.ide.fx.FshIdeFx", registry().find("fsh-ide-fx").mainClass);
+		// (the name given another artifact: not the catalog's main class)
+		assertEquals(0, commands("", false).add(args("fsh-ide-fx", "org.other:thing:1.0")), errors());
+		assertNull(registry().find("fsh-ide-fx").mainClass);
+		// (a main class typed is the one)
+		assertEquals(0, commands("", false).add(args("fsh-ide-fx", "us.bringardner:fsh-ide:2.0.0", "my.Main")), errors());
+		assertEquals("my.Main", registry().find("fsh-ide-fx").mainClass);
+	}
+
+	@Test
+	void addANameTheCatalogDoesNotKnowIsAnArtifactOfThatName() throws Exception {
+		program("us.bringardner", "newthing", "3.0");
+		assertEquals(0, commands("", false).add(args("newthing")), errors());
+		assertEquals("us.bringardner:newthing:3.0", registry().find("newthing").coordinates.toString());
+	}
+
+	@Test
+	void addWhatIsNotThereSaysSo() {
+		assertEquals(1, commands("", false).add(args("pssh")));
+		assertTrue(errors().contains("parley: parley-ssh was found neither on Maven Central nor on this machine"), errors());
+		assertEquals(2, commands("", false).add(args()));
+		assertEquals(1, commands("", false).add(args("parley")));
+	}
+
+	@Test
+	void listRemoveAndAvailable() throws Exception {
+		program("us.bringardner", "fsh", "2.0.0");
+		ProgramCommands c = commands("", false);
+		assertEquals(0, c.add(args("fsh")), errors());
+		printed.reset();
+		assertEquals(0, c.list(args()));
+		assertEquals("fsh\tus.bringardner:fsh:2.0.0" + System.lineSeparator(), printed());
+		printed.reset();
+		assertEquals(0, c.available(args()));
+		assertTrue(printed().contains("The fsh shell  [added: 2.0.0]"), printed());
+		assertTrue(printed().contains("pssh"), printed());
+		assertFalse(printed().contains("The Parley SSH client  [added"), printed());
+		printed.reset();
+		assertEquals(0, c.remove(args("fsh")));
+		assertEquals("removed fsh" + System.lineSeparator(), printed());
+		assertEquals(1, c.remove(args("fsh")));
+		assertTrue(errors().contains("there is no program fsh here"), errors());
+	}
+
+	@Test
+	void updateMovesAReleaseToTheNewestRelease() throws Exception {
+		program("us.bringardner", "fsh", "2.0.0");
+		assertEquals(0, commands("", true).add(args("fsh")), errors());
+		printed.reset();
+		assertEquals(0, commands("", true).update(args()));
+		assertEquals("fsh: 2.0.0 is the newest" + System.lineSeparator(), printed());
+
+		// (a newer release, and a SNAPSHOT newer still: a program on a release stays on releases)
+		program("us.bringardner", "fsh", "2.0.0", "2.1.0");
+		put(where.userRepository, Coordinates.parse("us.bringardner:fsh:3.0.0-SNAPSHOT"), jar("x", "y"));
+		printed.reset();
+		assertEquals(0, commands("", true).update(args("fsh")), errors());
+		assertEquals("fsh: 2.0.0 -> 2.1.0" + System.lineSeparator(), printed());
+		assertEquals("2.1.0", registry().find("fsh").coordinates.version);
+		// (its command was made again, for the new jar)
+		String saved = new String(Files.readAllBytes(new File(where.launcherHome, "cache/fsh.args").toPath()), StandardCharsets.UTF_8);
+		assertTrue(saved.contains("fsh-2.1.0.jar"), saved);
+
+		assertEquals(1, commands("", true).update(args("nothere")));
+		assertTrue(errors().contains("there is no program nothere here"), errors());
+	}
+
+	@Test
+	void updateKeepsTheMainClassAndMovesASnapshotToTheNewestOfAll() throws Exception {
+		ProgramRegistry r = registry();
+		put(where.userRepository, Coordinates.parse("us.bringardner:fsh-ide:2.0.0-SNAPSHOT"), jar("x", "y"));
+		r.add(new Program("fsh-ide-fx", Coordinates.parse("us.bringardner:fsh-ide:2.0.0-SNAPSHOT"), "x.Fx"));
+		program("us.bringardner", "fsh-ide", "2.0.0");
+		assertEquals(0, commands("", false).update(args()), errors());
+		assertEquals("us.bringardner:fsh-ide:2.0.0", r.find("fsh-ide-fx").coordinates.toString());
+		assertEquals("x.Fx", r.find("fsh-ide-fx").mainClass);
+	}
+
+	@Test
+	void sizesAsPeopleReadThem() {
+		assertEquals("812 bytes", ProgramCommands.PrintedProgress.size(812));
+		assertEquals("37 KB", ProgramCommands.PrintedProgress.size(37 * 1024 + 10));
+		assertEquals("1.9 MB", ProgramCommands.PrintedProgress.size((long) (1.9 * 1024 * 1024)));
+	}
 }

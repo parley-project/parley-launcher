@@ -48,9 +48,14 @@ public final class Resolver {
 	private final Consumer<String> warn;
 
 	public Resolver(Locations where, Consumer<String> warn) {
+		this(where, warn, ProgressListener.NONE);
+	}
+
+	/** As Resolver(where, warn), with progress told what is downloaded */
+	public Resolver(Locations where, Consumer<String> warn, ProgressListener progress) {
 		this.where = where;
 		this.warn = warn;
-		this.repos = new Repositories(where, warn);
+		this.repos = new Repositories(where, warn, progress);
 	}
 
 	/** A jar on the class path: what it is and where */
