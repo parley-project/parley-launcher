@@ -55,6 +55,23 @@ public final class ProgramRegistry {
 		this.windows = windows;
 	}
 
+	/** The installation's folder */
+	public File prefix() {
+		return prefix;
+	}
+
+	/**
+	 * Whether this user can add and remove programs here: false for an installation made for every
+	 * user (by an administrator) when someone else runs the command.
+	 */
+	public boolean writable() {
+		File d = new File(prefix, "apps");
+		while (d != null && !d.exists()) {
+			d = d.getParentFile();
+		}
+		return d != null && Files.isWritable(d.toPath());
+	}
+
 	/** A program's app file (which may not exist) */
 	public File appFile(String name) {
 		return new File(new File(prefix, "apps"), name + ".properties");
