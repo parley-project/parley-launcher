@@ -1000,4 +1000,25 @@ class LauncherTest {
 		assertEquals("37 KB", ProgramCommands.PrintedProgress.size(37 * 1024 + 10));
 		assertEquals("1.9 MB", ProgramCommands.PrintedProgress.size((long) (1.9 * 1024 * 1024)));
 	}
+
+	@Test
+	void anInstallationForEveryoneIsNotChangedByOneUser() throws Exception {
+		program("us.bringardner", "fsh", "2.0.0", "2.1.0");
+		File apps = tmp.resolve("prefix").resolve("apps").toFile();
+		apps.mkdirs();
+		assertTrue(apps.setWritable(false, false));
+		try {
+			// (an administrator can write anywhere: nothing to see then)
+			org.junit.jupiter.api.Assumptions.assumeFalse(Files.isWritable(apps.toPath()));
+			assertEquals(1, commands("1\n", true).add(args("fsh")));
+			// (said before any question, with the command that does it)
+			assertFalse(errors().contains("Which one?"), errors());
+			assertTrue(errors().contains("is every user's"), errors());
+			assertTrue(errors().contains(File.separator + "parley add fsh") || errors().contains("parley.cmd add fsh"), errors());
+			assertEquals(1, commands("", true).update(args()));
+			assertEquals(1, commands("", true).remove(args("fsh")));
+		} finally {
+			apps.setWritable(true, false);
+		}
+	}
 }

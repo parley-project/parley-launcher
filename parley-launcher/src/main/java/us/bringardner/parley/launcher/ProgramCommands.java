@@ -69,11 +69,38 @@ public final class ProgramCommands {
 		return new Chooser(new Repositories(where, this::note), this::note);
 	}
 
+	/**
+	 * Whether this user can change the programs here. When not (the launcher was installed for every
+	 * user, and this is not an administrator), says so on err, with the command that does it.
+	 *
+	 * @param typed what was typed after "parley", for the message
+	 */
+	private boolean allowed(String command, List<String> typed) {
+		if( registry.writable() ) {
+			return true;
+		}
+		List<File> own = registry.commands(ProgramRegistry.SCRIPT);
+		String again = own.get(own.size() - 1).getPath() + " " + command + (typed.isEmpty() ? "" : " " + String.join(" ", typed));
+		err.println(ProgramRegistry.SCRIPT + ": the launcher in " + registry.prefix() + " is every user's, so its programs are changed by an administrator:");
+		if( File.separatorChar == '\\' ) {
+			err.println("  " + again + "   (from an administrator's prompt)");
+			err.println("or install the launcher for yourself alone (install.cmd --user).");
+		} else {
+			// (the full path: sudo's PATH often has no /usr/local/bin)
+			err.println("  sudo " + again);
+			err.println("or install the launcher for yourself alone (install.sh --user).");
+		}
+		return false;
+	}
+
 	/** add NAME [SPEC] [MAIN] */
 	public int add(List<String> args) {
 		if( args.isEmpty() || args.size() > 3 ) {
 			err.println("usage: parley add NAME [[GROUP:]ARTIFACT[:VERSION] | VERSION] [MAIN]");
 			return 2;
+		}
+		if( !allowed("add", args) ) {
+			return 1;
 		}
 		String name = args.get(0);
 		String spec = args.size() > 1 ? args.get(1) : null;
@@ -112,6 +139,9 @@ public final class ProgramCommands {
 		if( args.size() != 1 ) {
 			err.println("usage: parley remove NAME");
 			return 2;
+		}
+		if( !allowed("remove", args) ) {
+			return 1;
 		}
 		try {
 			registry.remove(args.get(0), launcherHome);
@@ -171,6 +201,9 @@ public final class ProgramCommands {
 	 * all, release or SNAPSHOT.
 	 */
 	public int update(List<String> args) {
+		if( !allowed("update", args) ) {
+			return 1;
+		}
 		int ret = 0;
 		try {
 			List<Program> programs = new ArrayList<>();
