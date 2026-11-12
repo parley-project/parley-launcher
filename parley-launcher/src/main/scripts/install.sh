@@ -16,7 +16,8 @@
 #
 # Usage: ./install.sh [--user] [--prefix DIR] [--bin DIR] [--uninstall]
 # Running it again (from a newer one) upgrades: bin and lib are replaced, apps are kept.
-# --uninstall removes the launcher, its programs' links and app files; the jars stay in the
+# --uninstall removes the launcher, its programs' links and app files, and a Java it downloaded
+# into PREFIX; the jars stay in the
 # repositories (they are Maven's too).
 
 set -e
@@ -87,7 +88,7 @@ if [ -n "$uninstall" ]; then
 			$SUDO rm -f "$l"
 		fi
 	done
-	$SUDO rm -rf "$prefix/bin" "$prefix/lib" "$prefix/apps" "$prefix/launcher.conf" "$prefix/LICENSE"
+	$SUDO rm -rf "$prefix/bin" "$prefix/lib" "$prefix/apps" "$prefix/java" "$prefix/launcher.conf" "$prefix/LICENSE"
 	$SUDO rmdir "$prefix" 2> /dev/null || true
 	echo "parley removed from $prefix"
 	exit 0

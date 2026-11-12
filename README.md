@@ -1,6 +1,7 @@
 # parley-launcher
 
-Runs a Parley program on a Java that is already installed (11 or later). Its command is `parley`
+Runs a Parley program on a Java that is already installed (11 or later), or on one it downloads
+for itself when there is none. Its command is `parley`
 (`parley-launcher`, the earlier name, still works). Every program (fsh, fsh-ide, pssh,
 parley-files-viewer ...) starts through one script, renamed or linked for it. The
 script makes sure every jar the program needs is on the machine, fetching the missing ones from
@@ -79,6 +80,9 @@ fsh
 | `parley versions [GROUP:]ARTIFACT` | The versions found, newest first, the default marked |
 | `parley remove NAME` | Remove one |
 | `parley command NAME` | The command NAME runs, one word a line |
+| `parley java` | The Java the programs run on |
+| `parley java install` | Download a Java for the launcher's own use (see below) |
+| `parley java update` | Replace a Java the launcher downloaded with the newest |
 
 What `add` works out for itself:
 
@@ -120,6 +124,28 @@ what the shell script does, with these differences:
 4. A wrapper (`<wrapper>`) is run on Windows only when it is an `.exe`, `.com`, `.bat` or `.cmd`: fsh's
    `fshexec` has no Windows version, so fsh runs without it.
 5. `cmd` may ask "Terminate batch job (Y/N)?" after Ctrl-C ends a program that doesn't handle it itself.
+
+## When there is no Java
+
+On Linux and macOS, when no Java 11 or later is found, the launcher asks:
+
+```
+fsh: Java 11 or later is needed, and none was found on this computer.
+Download Java now, for the Parley programs only (Eclipse Temurin, about 50 MB, into ~/.parley/launcher/java)? [Y/n]
+```
+
+1. **Yes** (or Enter) downloads the newest long-term-support Eclipse Temurin runtime for this
+   platform from adoptium.net (`curl` or `wget`, and `tar`), checks it against the SHA-256
+   adoptium.net gives for it, and unpacks it into `~/.parley/launcher/java`; as root, into the
+   installation's folder (`/usr/local/lib/parley/launcher/java`), for every user.
+2. **Only the launcher uses it.** It isn't put on the `PATH` and no other Java is touched.
+3. **With no terminal to ask on, nothing is downloaded**, and the message says how to install
+   one. `PARLEY_INSTALL_JAVA=yes` downloads without asking; `PARLEY_INSTALL_JAVA=no` never asks.
+4. **`parley java install`** downloads one without the question, also when another Java is
+   installed. **`parley java update`** replaces a downloaded Java with the newest (it gets no
+   updates on its own); the programs' commands are made again at their next start.
+
+On Windows the launcher doesn't download a Java yet.
 
 ## The Parley programs
 
@@ -172,6 +198,9 @@ aren't on Maven Central.
 |---|---|
 | `JAVA_HOME` | Its java when that is 11 or later (else the newest Java found) |
 | `PARLEY_JAVA` | The java executable to use |
+| `PARLEY_INSTALL_JAVA` | When no Java is found: `yes` downloads one without asking, `no` never does; otherwise the launcher asks |
+| `PARLEY_JAVA_VERSION` | The Java to download (`21`, `25` ...) instead of the newest long-term-support one |
+| `PARLEY_JAVA_API` | Instead of `https://api.adoptium.net/v3` (where a Java is downloaded from) |
 | `PARLEY_REFRESH=1` | Make the command again (after installing a newer Java, say) |
 | `PARLEY_OFFLINE=true` | Download nothing |
 | `PARLEY_MACHINE_REPOSITORY` | Instead of `/usr/local/lib/parley/repository` |
