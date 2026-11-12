@@ -25,7 +25,7 @@ import java.util.List;
  * command as it was typed:
  *
  * <pre>
- * java -jar parley-launcher.jar --prefix PREFIX [--bin BIN] [--java JAVA --key KEY] COMMAND ...
+ * java -jar parley-launcher.jar --prefix PREFIX [--bin BIN] [--home HOME] [--java JAVA --key KEY] COMMAND ...
  *
  *   add NAME [[GROUP:]ARTIFACT[:VERSION] | VERSION] [MAIN]
  *   remove NAME
@@ -34,6 +34,7 @@ import java.util.List;
  *   available
  * </pre>
  *
+ * --home: the folder the script keeps the saved commands in (~/.parley/launcher unless moved).
  * --java and --key: add and update make the program's command at once, for that java (left out:
  * it is made at the program's first start).
  *
@@ -54,14 +55,15 @@ public final class Main {
 
 	static int run(String[] args) {
 		// the installation, before the command
-		String prefix = null, bin = null, java = null, key = "";
+		String prefix = null, bin = null, home = null, java = null, key = "";
 		int at = 0;
-		while (at + 1 < args.length && (args[at].equals("--prefix") || args[at].equals("--bin") || args[at].equals("--java")
+		while (at + 1 < args.length && (args[at].equals("--prefix") || args[at].equals("--bin") || args[at].equals("--home") || args[at].equals("--java")
 				|| args[at].equals("--key")) && !"resolve".equals(args[0])) {
 			String v = args[at + 1];
 			switch (args[at]) {
 			case "--prefix": prefix = v; break;
 			case "--bin": bin = v; break;
+			case "--home": home = v; break;
 			case "--java": java = v; break;
 			default: key = v;
 			}
@@ -81,14 +83,14 @@ public final class Main {
 		case "list":
 		case "update":
 		case "available":
-			return manage(cmd, rest, prefix, bin, java, key);
+			return manage(cmd, rest, prefix, bin, home, java, key);
 		case "choose":
 		case "versions":
 			return chooseOrVersions(cmd, rest);
 		case "resolve":
 			return resolve(args);
 		default:
-			System.err.println("usage: parley-launcher --prefix PREFIX [--bin BIN] [--java JAVA --key KEY] add|remove|list|update|available ...");
+			System.err.println("usage: parley-launcher --prefix PREFIX [--bin BIN] [--home HOME] [--java JAVA --key KEY] add|remove|list|update|available ...");
 			System.err.println("       parley-launcher resolve --app NAME --app-file FILE --java JAVA --cache BASE [--key KEY]");
 			System.err.println("       parley-launcher versions [GROUP:]ARTIFACT[:VERSION]");
 			System.err.println("       parley-launcher choose [GROUP:]ARTIFACT[:VERSION]");
@@ -97,14 +99,14 @@ public final class Main {
 	}
 
 	/** add, remove, list, update, available */
-	private static int manage(String cmd, List<String> rest, String prefix, String bin, String java, String key) {
+	private static int manage(String cmd, List<String> rest, String prefix, String bin, String home, String java, String key) {
 		if( prefix == null ) {
 			System.err.println("parley-launcher: " + cmd + " needs --prefix (the folder the launcher is installed in)");
 			return 2;
 		}
 		boolean windows = System.getProperty("os.name", "").toLowerCase().startsWith("windows");
 		ProgramRegistry registry = new ProgramRegistry(new File(prefix), bin == null || bin.isEmpty() ? null : new File(bin), windows);
-		ProgramCommands commands = new ProgramCommands(registry, Locations.fromEnvironment(), Catalog.builtIn(),
+		ProgramCommands commands = new ProgramCommands(registry, Locations.fromEnvironment(), Catalog.builtIn(), home == null || home.isEmpty() ? null : new File(home),
 				new BufferedReader(new InputStreamReader(System.in, Charset.defaultCharset())), System.out, System.err);
 		if( java != null ) {
 			commands.makeCommandsFor(java, key);

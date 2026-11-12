@@ -26,6 +26,8 @@ public final class ProgramCommands {
 	private final ProgramRegistry registry;
 	private final Locations where;
 	private final Catalog catalog;
+	/** the folder the saved commands are in (as the script has it) */
+	private final File launcherHome;
 	private final BufferedReader in;
 	private final PrintStream out;
 	private final PrintStream err;
@@ -34,11 +36,13 @@ public final class ProgramCommands {
 	private String key = "";
 
 	/**
+	 * @param launcherHome the folder the script keeps the saved commands in; null: where.launcherHome
 	 * @param in where the answer to "Which version?" is read from
 	 * @param out what a command prints; err: its questions, notes, progress and errors
 	 */
-	public ProgramCommands(ProgramRegistry registry, Locations where, Catalog catalog, BufferedReader in, PrintStream out,
-			PrintStream err) {
+	public ProgramCommands(ProgramRegistry registry, Locations where, Catalog catalog, File launcherHome, BufferedReader in,
+			PrintStream out, PrintStream err) {
+		this.launcherHome = launcherHome == null ? where.launcherHome : launcherHome;
 		this.registry = registry;
 		this.where = where;
 		this.catalog = catalog;
@@ -110,7 +114,7 @@ public final class ProgramCommands {
 			return 2;
 		}
 		try {
-			registry.remove(args.get(0), where.launcherHome);
+			registry.remove(args.get(0), launcherHome);
 			out.println("removed " + args.get(0));
 			return 0;
 		} catch (LaunchException e) {
@@ -237,7 +241,7 @@ public final class ProgramCommands {
 		try {
 			Resolver resolver = new Resolver(where, w -> err.println(p.name + ": note: " + w), new PrintedProgress(err));
 			Resolver.Launch launch = resolver.resolve(p.name, registry.appFile(p.name), javaPath);
-			SavedCommand.write(launch, javaPath, SavedCommand.base(where, p.name), key);
+			SavedCommand.write(launch, javaPath, SavedCommand.base(launcherHome, p.name), key);
 			return true;
 		} catch (LaunchException e) {
 			err.println(e.getMessage().startsWith(p.name) ? e.getMessage() : p.name + ": " + e.getMessage());

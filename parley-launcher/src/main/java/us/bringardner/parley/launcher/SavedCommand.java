@@ -23,8 +23,8 @@ public final class SavedCommand {
 	}
 
 	/** Where NAME's command is saved, without the .args or .check */
-	public static File base(Locations where, String name) {
-		return new File(new File(where.launcherHome, "cache"), name);
+	public static File base(File launcherHome, String name) {
+		return new File(new File(launcherHome, "cache"), name);
 	}
 
 	/**
