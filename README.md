@@ -117,16 +117,14 @@ what the shell script does, with these differences:
 |---|---|
 | `fsh` | `parley-launcher add fsh` (or `us.bringardner:fsh:VERSION`) |
 | `fsh-ide` | `parley-launcher add fsh-ide us.bringardner:fsh-ide:VERSION` |
-| `fsh-ide-fx` (JavaFX) | `parley-launcher add fsh-ide-fx us.bringardner:fsh-ide:VERSION us.bringardner.fsh.ide.fx.FshIdeFx` |
 | `fshdb` | `parley-launcher add fshdb us.bringardner:fshdb:VERSION` |
 | `pssh` | `parley-launcher add pssh us.bringardner.parley:parley-ssh:VERSION` |
 | `parley-files-viewer` | `parley-launcher add parley-files-viewer us.bringardner.parley:parley-files-viewer:VERSION` |
-| `parley-files-viewer-fx` (JavaFX) | `parley-launcher add parley-files-viewer-fx us.bringardner.parley:parley-files-viewer:VERSION us.bringardner.parley.files.viewer.fx.Launcher` |
 | `pfv` | `parley-launcher add pfv us.bringardner.parley:parley-files-viewer-tui:VERSION` |
 
 The last argument of `add` names another main class in the same jar (`main=` in the app file).
-fsh-ide and fshdb run fsh scripts, so they use fsh's native jar too. The JavaFX programs get
-JavaFX's jars for the platform they run on.
+fsh-ide and fshdb run fsh scripts, so they use fsh's native jar too. A program that uses JavaFX
+gets JavaFX's jars for the platform it runs on.
 
 ## Plugins
 
