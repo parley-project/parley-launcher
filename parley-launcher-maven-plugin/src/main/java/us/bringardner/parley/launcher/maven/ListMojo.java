@@ -74,7 +74,7 @@ public class ListMojo extends AbstractMojo {
 
 	/**
 	 * Instead of nativeClassifier: the dependency (group:artifact) whose {platform} jar of native
-	 * files the program uses, as fsh-ide and fshdb use fsh's
+	 * files the program uses, as Fsh Studio and fshdb use fsh's
 	 */
 	@Parameter
 	private String nativeFrom;

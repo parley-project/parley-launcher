@@ -3,7 +3,7 @@
 #   NAME | GROUP:ARTIFACT | MAIN CLASS (empty: the jar's own) | what it is
 fsh                    | us.bringardner:fsh                              |                                              | The fsh shell
 fshdb                  | us.bringardner:fshdb                            |                                              | The fsh script debugger (command line)
-fshide                 | us.bringardner:fsh-ide                          |                                              | fsh IDE: edit, run and debug fsh scripts
+fshstudio              | us.bringardner:parley-fsh-studio                |                                              | Fsh Studio: edit, run and debug fsh scripts
 pssh                   | us.bringardner.parley:parley-ssh                |                                              | The Parley SSH client
 pfiles                 | us.bringardner.parley:parley-files-viewer       |                                              | Parley Files: the files viewer
 pfv                    | us.bringardner.parley:parley-files-viewer-tui   |                                              | The Parley files viewer for a terminal

@@ -840,10 +840,10 @@ class LauncherTest {
 		Catalog c = Catalog.builtIn();
 		assertEquals("us.bringardner.parley:parley-ssh", c.find("pssh").artifact());
 		assertNull(c.find("pssh").mainClass);
-		assertEquals("us.bringardner:fsh-ide", c.find("fshide").artifact());
+		assertEquals("us.bringardner:parley-fsh-studio", c.find("fshstudio").artifact());
 		assertEquals("us.bringardner.parley:parley-files-viewer", c.find("pfiles").artifact());
-		// (the names before fsh IDE and Parley Files, and the JavaFX programs, are gone)
-		for(String gone : new String[] { "fsh-ide", "fsh-ide-fx", "parley-files-viewer", "parley-files-viewer-fx" }) {
+		// (the names before Fsh Studio and Parley Files, and the JavaFX programs, are gone)
+		for(String gone : new String[] { "fshide", "fsh-ide", "fsh-ide-fx", "parley-files-viewer", "parley-files-viewer-fx" }) {
 			assertNull(c.find(gone), gone);
 		}
 		assertNull(c.find("no-such-program"));
@@ -871,10 +871,10 @@ class LauncherTest {
 		assertTrue(r.list().isEmpty());
 		assertNull(r.find("fsh"));
 		r.add(new Program("fsh", Coordinates.parse("us.bringardner:fsh:2.0.0"), null));
-		r.add(new Program("other", Coordinates.parse("us.bringardner:fsh-ide:2.0.0"), "x.Fx"));
+		r.add(new Program("other", Coordinates.parse("us.bringardner:parley-fsh-studio:2.0.0"), "x.Fx"));
 		assertEquals("# fsh: the program the command fsh runs\nartifact=us.bringardner:fsh:2.0.0\n",
 				new String(Files.readAllBytes(r.appFile("fsh").toPath()), StandardCharsets.UTF_8));
-		assertEquals("[fsh (us.bringardner:fsh:2.0.0), other (us.bringardner:fsh-ide:2.0.0)]", r.list().toString());
+		assertEquals("[fsh (us.bringardner:fsh:2.0.0), other (us.bringardner:parley-fsh-studio:2.0.0)]", r.list().toString());
 		assertEquals("x.Fx", r.find("other").mainClass);
 		File inner = r.commands("fsh").get(0);
 		File outer = r.commands("fsh").get(1);
@@ -917,7 +917,7 @@ class LauncherTest {
 		for(String bad : new String[] { "", ".hidden", "-x", "a/b", "a b", "parley", "parley-launcher", "a:b" }) {
 			assertNotNull(ProgramRegistry.badName(bad), bad);
 		}
-		assertNull(ProgramRegistry.badName("fsh-ide"));
+		assertNull(ProgramRegistry.badName("parley-fsh-studio"));
 	}
 
 	@Test
@@ -1036,11 +1036,11 @@ class LauncherTest {
 	@Test
 	void updateKeepsTheMainClassAndMovesASnapshotToTheNewestOfAll() throws Exception {
 		ProgramRegistry r = registry();
-		put(where.userRepository, Coordinates.parse("us.bringardner:fsh-ide:2.0.0-SNAPSHOT"), jar("x", "y"));
-		r.add(new Program("other", Coordinates.parse("us.bringardner:fsh-ide:2.0.0-SNAPSHOT"), "x.Fx"));
-		program("us.bringardner", "fsh-ide", "2.0.0");
+		put(where.userRepository, Coordinates.parse("us.bringardner:parley-fsh-studio:2.0.0-SNAPSHOT"), jar("x", "y"));
+		r.add(new Program("other", Coordinates.parse("us.bringardner:parley-fsh-studio:2.0.0-SNAPSHOT"), "x.Fx"));
+		program("us.bringardner", "parley-fsh-studio", "2.0.0");
 		assertEquals(0, commands("", false).update(args()), errors());
-		assertEquals("us.bringardner:fsh-ide:2.0.0", r.find("other").coordinates.toString());
+		assertEquals("us.bringardner:parley-fsh-studio:2.0.0", r.find("other").coordinates.toString());
 		assertEquals("x.Fx", r.find("other").mainClass);
 	}
 
