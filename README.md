@@ -2,7 +2,7 @@
 
 Runs a Parley program on a Java that is already installed (11 or later), or on one it downloads
 for itself when there is none. Its command is `parley`
-(`parley-launcher`, the earlier name, still works). Every program (fsh, fshide, pssh,
+(`parley-launcher`, the earlier name, still works). Every program (fsh, fshstudio, pssh,
 pfiles ...) starts through one script, renamed or linked for it. The
 script makes sure every jar the program needs is on the machine, fetching the missing ones from
 Maven Central, then runs it. The programs share their jars the way Maven projects share
@@ -156,7 +156,7 @@ On Windows the launcher doesn't download a Java yet.
 | Command | Add it with |
 |---|---|
 | `fsh` | `parley add fsh` |
-| `fshide` (fsh IDE) | `parley add fshide` |
+| `fshstudio` (Fsh Studio) | `parley add fshstudio` |
 | `fshdb` | `parley add fshdb` |
 | `pssh` | `parley add pssh` |
 | `pfiles` (Parley Files) | `parley add pfiles` |
@@ -164,10 +164,10 @@ On Windows the launcher doesn't download a Java yet.
 
 On Windows, for now, each needs its artifact, as in
 `parley-launcher add pssh us.bringardner.parley:parley-ssh` and
-`parley-launcher add fshide us.bringardner:fsh-ide`.
+`parley-launcher add fshstudio us.bringardner:parley-fsh-studio`.
 
 The last argument of `add` names another main class in the same jar (`main=` in the app file).
-fshide and fshdb run fsh scripts, so they use fsh's native jar too. A program that uses JavaFX
+fshstudio and fshdb run fsh scripts, so they use fsh's native jar too. A program that uses JavaFX
 gets JavaFX's jars for the platform it runs on.
 
 ## Plugins
