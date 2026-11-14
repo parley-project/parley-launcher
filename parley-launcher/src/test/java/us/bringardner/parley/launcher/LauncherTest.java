@@ -1056,7 +1056,9 @@ class LauncherTest {
 		program("us.bringardner", "fsh", "2.0.0", "2.1.0");
 		File apps = tmp.resolve("prefix").resolve("apps").toFile();
 		apps.mkdirs();
-		assertTrue(apps.setWritable(false, false));
+		// (Windows cannot make a folder unwritable this way: setWritable is false and the folder stays
+		// writable, so there is no installation here that this user can't change)
+		org.junit.jupiter.api.Assumptions.assumeTrue(apps.setWritable(false, false));
 		try {
 			// (an administrator can write anywhere: nothing to see then)
 			org.junit.jupiter.api.Assumptions.assumeFalse(Files.isWritable(apps.toPath()));
