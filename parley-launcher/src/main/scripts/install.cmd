@@ -10,7 +10,7 @@ rem PREFIX is %ProgramData%\Parley\launcher (BIN %ProgramData%\Parley\bin; needs
 rem prompt), or with --user %USERPROFILE%\.parley\launcher (BIN %USERPROFILE%\.local\bin). Then add
 rem the programs, for example:
 rem
-rem   parley-launcher add fsh                      (picks the version; or fsh:2.0.0, us.bringardner:fsh:2.0.0)
+rem   parley-launcher add fsh                      (picks the version; or fsh:2.0.0, us.bringardner:parley-fsh:2.0.0)
 rem
 rem Usage: install.cmd [--user] [--prefix DIR] [--bin DIR] [--uninstall]
 rem Running it again (from a newer one) upgrades: bin and lib are replaced, apps are kept.

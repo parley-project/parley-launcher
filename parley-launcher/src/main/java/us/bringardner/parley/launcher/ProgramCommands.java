@@ -282,7 +282,7 @@ public final class ProgramCommands {
 		}
 	}
 
-	/** Downloads as lines of text: "  downloading fsh-2.0.0.jar ... 1.2 MB" */
+	/** Downloads as lines of text: "  downloading parley-fsh-2.0.0.jar ... 1.2 MB" */
 	static final class PrintedProgress implements ProgressListener {
 		private final PrintStream to;
 

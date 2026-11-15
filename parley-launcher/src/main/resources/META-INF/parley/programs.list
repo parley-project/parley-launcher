@@ -1,8 +1,8 @@
 # parley-launcher programs 1
 # The Parley programs "parley add NAME" knows by name, one a line:
 #   NAME | GROUP:ARTIFACT | MAIN CLASS (empty: the jar's own) | what it is
-fsh                    | us.bringardner:fsh                              |                                              | The fsh shell
-fshdb                  | us.bringardner:fshdb                            |                                              | The fsh script debugger (command line)
+fsh                    | us.bringardner:parley-fsh                       |                                              | The fsh shell
+fshdb                  | us.bringardner:parley-fshdb                     |                                              | The fsh script debugger (command line)
 fshstudio              | us.bringardner:parley-fsh-studio                |                                              | Fsh Studio: edit, run and debug fsh scripts
 pssh                   | us.bringardner.parley:parley-ssh                |                                              | The Parley SSH client
 pfiles                 | us.bringardner.parley:parley-files-viewer       |                                              | Parley Files: the files viewer
