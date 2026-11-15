@@ -21,7 +21,7 @@ import java.util.Properties;
  *
  * <pre>
  * # fsh: the program the command fsh runs
- * artifact=us.bringardner:fsh:2.0.0
+ * artifact=us.bringardner:parley-fsh:2.0.0
  * main=...          (only when it isn't the main class the jar names)
  * </pre>
  *
