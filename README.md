@@ -51,7 +51,7 @@ fsh
    against). One that isn't there is downloaded from Central's snapshot repository
    (`https://central.sonatype.com/repository/maven-snapshots/`): its newest build, kept beside
    where `mvn install` puts its own, under the name Maven gives a build
-   (`fsh-2.0.0-20261031.120000-3.jar`), and checked against the `.sha1` published with it. A day
+   (`parley-fsh-2.0.0-20261031.120000-3.jar`), and checked against the `.sha1` published with it. A day
    later the next start looks for a newer build. Without the network, the build downloaded before
    is used. One on neither stops the program with a message naming the project to install.
 6. **The command is saved.** The first start works out the command (`java`, its options, the
@@ -63,7 +63,7 @@ fsh
    `settings.xml` makes the command again, and so does a failure that may pass (an optional
    native jar the network didn't deliver).
 7. **Native files.** A program can name a jar of this platform's native files
-   (`fsh-2.0.0-linux-x86_64.jar`: fsh's keyboard library and `fshexec`). The launcher unpacks it
+   (`parley-fsh-2.0.0-linux-x86_64.jar`: fsh's keyboard library and `fshexec`). The launcher unpacks it
    into `~/.parley/launcher/native/` and passes that folder to the program's options. Without it,
    the options that need it are left out (fsh then uses JNA).
 
@@ -228,7 +228,7 @@ aren't on Maven Central.
       <option>-Djava.library.path={native}</option>
       <option>17+:--enable-native-access=ALL-UNNAMED</option>  <!-- only on Java 17 or later -->
     </options>
-    <nativeClassifier>{platform}</nativeClassifier>             <!-- fsh-2.0.0-linux-x86_64.jar ... -->
+    <nativeClassifier>{platform}</nativeClassifier>             <!-- parley-fsh-2.0.0-linux-x86_64.jar ... -->
     <wrapper><part>{native}/fshexec</part><part>-j</part></wrapper>
   </configuration>
 </plugin>
@@ -238,7 +238,7 @@ aren't on Maven Central.
 (`linux-x86_64`, `linux-aarch64`, `macos-x86_64`, `macos-aarch64` or `windows-x86_64`) and `{app}`
 is the program's name. An option can start with conditions: `17+:` (only on Java 17 or later) and
 `macos:`, `linux:` or `windows:` (only on that platform), as in `macos:-Xdock:name={app}`.
-`<nativeFrom>us.bringardner:fsh</nativeFrom>` instead of `nativeClassifier` uses a dependency's
+`<nativeFrom>us.bringardner:parley-fsh</nativeFrom>` instead of `nativeClassifier` uses a dependency's
 native jar. JavaFX's platform jars are listed as `${javafx.platform}`: the launcher takes the one
 for where the program runs (`linux`, `mac-aarch64`, `win` ...), checked against Maven Central's
 `.sha1`. A plugin needs only the `list` goal, with no configuration.
