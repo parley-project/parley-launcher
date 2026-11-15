@@ -16,13 +16,13 @@ import java.util.List;
  *
  * <pre>
  * # parley-launcher list 1
- * artifact=us.bringardner:fsh:2.0.0
+ * artifact=us.bringardner:parley-fsh:2.0.0
  * main=us.bringardner.fsh.Console
  * java=11
  * option=-Xss16m
  * option=-Djava.library.path=${native}
  * option=17+:--enable-native-access=ALL-UNNAMED
- * native=us.bringardner:fsh:jar:${platform}:2.0.0
+ * native=us.bringardner:parley-fsh:jar:${platform}:2.0.0
  * native.optional=true
  * wrapper=${native}/fshexec
  * wrapper=-j

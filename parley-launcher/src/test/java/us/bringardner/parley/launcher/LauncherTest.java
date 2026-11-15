@@ -992,12 +992,12 @@ class LauncherTest {
 
 	@Test
 	void listRemoveAndAvailable() throws Exception {
-		program("us.bringardner", "fsh", "2.0.0");
+		program("us.bringardner", "parley-fsh", "2.0.0");
 		ProgramCommands c = commands("", false);
 		assertEquals(0, c.add(args("fsh")), errors());
 		printed.reset();
 		assertEquals(0, c.list(args()));
-		assertEquals("fsh\tus.bringardner:fsh:2.0.0" + System.lineSeparator(), printed());
+		assertEquals("fsh\tus.bringardner:parley-fsh:2.0.0" + System.lineSeparator(), printed());
 		printed.reset();
 		assertEquals(0, c.available(args()));
 		assertTrue(printed().contains("The fsh shell  [added: 2.0.0]"), printed());
@@ -1012,22 +1012,22 @@ class LauncherTest {
 
 	@Test
 	void updateMovesAReleaseToTheNewestRelease() throws Exception {
-		program("us.bringardner", "fsh", "2.0.0");
+		program("us.bringardner", "parley-fsh", "2.0.0");
 		assertEquals(0, commands("", true).add(args("fsh")), errors());
 		printed.reset();
 		assertEquals(0, commands("", true).update(args()));
 		assertEquals("fsh: 2.0.0 is the newest" + System.lineSeparator(), printed());
 
 		// (a newer release, and a SNAPSHOT newer still: a program on a release stays on releases)
-		program("us.bringardner", "fsh", "2.0.0", "2.1.0");
-		put(where.userRepository, Coordinates.parse("us.bringardner:fsh:3.0.0-SNAPSHOT"), jar("x", "y"));
+		program("us.bringardner", "parley-fsh", "2.0.0", "2.1.0");
+		put(where.userRepository, Coordinates.parse("us.bringardner:parley-fsh:3.0.0-SNAPSHOT"), jar("x", "y"));
 		printed.reset();
 		assertEquals(0, commands("", true).update(args("fsh")), errors());
 		assertEquals("fsh: 2.0.0 -> 2.1.0" + System.lineSeparator(), printed());
 		assertEquals("2.1.0", registry().find("fsh").coordinates.version);
 		// (its command was made again, for the new jar)
 		String saved = new String(Files.readAllBytes(new File(where.launcherHome, "cache/fsh.args").toPath()), StandardCharsets.UTF_8);
-		assertTrue(saved.contains("fsh-2.1.0.jar"), saved);
+		assertTrue(saved.contains("parley-fsh-2.1.0.jar"), saved);
 
 		assertEquals(1, commands("", true).update(args("nothere")));
 		assertTrue(errors().contains("there is no program nothere here"), errors());
